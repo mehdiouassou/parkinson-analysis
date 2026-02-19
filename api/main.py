@@ -354,6 +354,12 @@ def stop_recording():
     RealSense cameras produce: .bag + .mp4
     If called during warm-up, cancels the warm-up before any writers are created.
     """
+    mp4_files = []
+    bag_files = []
+    patient_name = ""
+    patient_id = ""
+    camera_types = {}
+
     with recording_lock:
         if recording_state["status"] == "idle":
             return {"status": "idle", "message": "No recording is active"}
@@ -375,43 +381,18 @@ def stop_recording():
                 "path": str(RECORDINGS_DIR)
             }
 
-    mp4_files = []
-    bag_files = []
-    patient_name = ""
-    patient_id = ""
-    camera_types = {}
-
-    with recording_lock:
+        # Atomically read all state and clear in one lock acquisition
         patient_name = recording_state.get("patient_name", "")
         patient_id = recording_state.get("patient_id", "")
         camera_types = recording_state.get("camera_types", {}).copy()
 
-        # Stop BAG recording (RealSense cameras)
-        for cam_id, is_recording in recording_state["writers_bag"].items():
-            if is_recording:
-                print(f"[Recording] Stopping BAG recording logical cam {cam_id}")
-                physical_cam = get_camera_source(get_physical_camera_id(cam_id))
-                physical_cam.stop_recording()
-            filename = recording_state["filenames_bag"].get(cam_id)
-            if filename:
-                filepath = RECORDINGS_DIR / filename
-                print(f"[Recording] BAG {filename}: exists={filepath.exists()}, size={filepath.stat().st_size if filepath.exists() else 0}")
-                if filepath.exists():
-                    bag_files.append(filename)
+        # Collect writers and filenames before clearing state
+        writers_bag = dict(recording_state["writers_bag"])
+        writers_mp4 = dict(recording_state["writers_mp4"])
+        filenames_bag = dict(recording_state["filenames_bag"])
+        filenames_mp4 = dict(recording_state["filenames_mp4"])
 
-        # Release MP4 writers
-        for cam_id, writer in recording_state["writers_mp4"].items():
-            if writer is not None:
-                print(f"[Recording] Releasing MP4 writer logical cam {cam_id}")
-                writer.release()
-            filename = recording_state["filenames_mp4"].get(cam_id)
-            if filename:
-                filepath = RECORDINGS_DIR / filename
-                print(f"[Recording] MP4 {filename}: exists={filepath.exists()}, size={filepath.stat().st_size if filepath.exists() else 0}")
-                if filepath.exists():
-                    mp4_files.append(filename)
-
-        # Clear state
+        # Clear state immediately to prevent concurrent operations
         recording_state["status"] = "idle"
         recording_state["start_time"] = None
         recording_state["warmup_start"] = None
@@ -424,6 +405,46 @@ def stop_recording():
         recording_state["frame_counts"] = {}
         recording_state["patient_name"] = ""
         recording_state["patient_id"] = ""
+
+    # Release resources outside the lock to avoid holding it during I/O
+    for cam_id, is_recording in writers_bag.items():
+        if is_recording:
+            print(f"[Recording] Stopping BAG recording logical cam {cam_id}")
+            try:
+                physical_cam = get_camera_source(get_physical_camera_id(cam_id))
+                physical_cam.stop_recording()
+            except Exception as e:
+                print(f"[Recording] Error stopping BAG cam {cam_id}: {e}")
+        filename = filenames_bag.get(cam_id)
+        if filename:
+            filepath = RECORDINGS_DIR / filename
+            try:
+                exists = filepath.exists()
+                size = filepath.stat().st_size if exists else 0
+                print(f"[Recording] BAG {filename}: exists={exists}, size={size}")
+                if exists and size > 0:
+                    bag_files.append(filename)
+            except OSError as e:
+                print(f"[Recording] Error checking BAG file {filename}: {e}")
+
+    for cam_id, writer in writers_mp4.items():
+        if writer is not None:
+            print(f"[Recording] Releasing MP4 writer logical cam {cam_id}")
+            try:
+                writer.release()
+            except Exception as e:
+                print(f"[Recording] Error releasing MP4 writer cam {cam_id}: {e}")
+        filename = filenames_mp4.get(cam_id)
+        if filename:
+            filepath = RECORDINGS_DIR / filename
+            try:
+                exists = filepath.exists()
+                size = filepath.stat().st_size if exists else 0
+                print(f"[Recording] MP4 {filename}: exists={exists}, size={size}")
+                if exists and size > 0:
+                    mp4_files.append(filename)
+            except OSError as e:
+                print(f"[Recording] Error checking MP4 file {filename}: {e}")
 
     # Save metadata sidecar for each MP4 file
     for mp4_file in mp4_files:
@@ -735,7 +756,7 @@ def get_video(video_name: str, request: Request):
     video_path = RECORDINGS_DIR / video_name
 
     if not video_path.exists():
-        return {"error": "Video not found"}
+        return JSONResponse(status_code=404, content={"error": "Video not found"})
 
     file_size = video_path.stat().st_size
     range_header = request.headers.get('range')
@@ -783,7 +804,7 @@ def get_video_metadata(video_name: str):
     video_path = RECORDINGS_DIR / video_name
 
     if not video_path.exists():
-        return {"error": "Video not found"}
+        return JSONResponse(status_code=404, content={"error": "Video not found"})
 
     # Try sidecar JSON first
     metadata_file = video_name.replace('.mp4', '_metadata.json')
@@ -918,11 +939,13 @@ def start_processing(data: ProcessRequest):
     """Start processing a video batch."""
     batch_id = data.batch_id
 
-    camera1_file = RECORDINGS_DIR / f"{batch_id}_camera1.mp4"
-    camera2_file = RECORDINGS_DIR / f"{batch_id}_camera2.mp4"
+    camera1_bag = RECORDINGS_DIR / f"{batch_id}_camera1.bag"
+    camera2_bag = RECORDINGS_DIR / f"{batch_id}_camera2.bag"
+    camera1_mp4 = RECORDINGS_DIR / f"{batch_id}_camera1.mp4"
+    camera2_mp4 = RECORDINGS_DIR / f"{batch_id}_camera2.mp4"
 
-    has_cam1 = camera1_file.exists()
-    has_cam2 = camera2_file.exists()
+    has_cam1 = camera1_bag.exists() or camera1_mp4.exists()
+    has_cam2 = camera2_bag.exists() or camera2_mp4.exists()
 
     if not has_cam1 and not has_cam2:
         return {"success": False, "message": "No camera files found"}
@@ -1173,7 +1196,7 @@ def download_video(filename: str):
     """Download a video file (MP4)."""
     filepath = RECORDINGS_DIR / filename
     if not filepath.exists():
-        return {"error": "File not found"}
+        return JSONResponse(status_code=404, content={"error": "File not found"})
     return FileResponse(filepath, filename=filename, media_type="video/mp4")
 
 
@@ -1182,7 +1205,7 @@ def download_bag(filename: str):
     """Download a RealSense BAG file."""
     filepath = RECORDINGS_DIR / filename
     if not filepath.exists():
-        return {"error": "File not found"}
+        return JSONResponse(status_code=404, content={"error": "File not found"})
     return FileResponse(filepath, filename=filename, media_type="application/octet-stream")
 
 
@@ -1191,7 +1214,7 @@ def download_csv(filename: str):
     """Download a CSV file."""
     filepath = TAGGING_DIR / filename
     if not filepath.exists():
-        return {"error": "File not found"}
+        return JSONResponse(status_code=404, content={"error": "File not found"})
     return FileResponse(filepath, filename=filename, media_type="text/csv")
 
 
@@ -1200,7 +1223,7 @@ def download_json(filename: str):
     """Download a JSON file."""
     filepath = PROCESSED_DIR / filename
     if not filepath.exists():
-        return {"error": "File not found"}
+        return JSONResponse(status_code=404, content={"error": "File not found"})
     return FileResponse(filepath, filename=filename, media_type="application/json")
 
 
@@ -1211,7 +1234,7 @@ def view_json(filename: str):
     if not filepath.exists():
         filepath = RECORDINGS_DIR / filename
         if not filepath.exists():
-            return {"error": "File not found"}
+            return JSONResponse(status_code=404, content={"error": "File not found"})
 
     try:
         content = json.loads(filepath.read_text())

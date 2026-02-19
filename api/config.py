@@ -69,6 +69,9 @@ TAGGING_DIR.mkdir(exist_ok=True)
 PROCESSED_DIR = API_DIR / "processed"
 PROCESSED_DIR.mkdir(exist_ok=True)
 
+MODELS_DIR = API_DIR.parent / "models"
+MODELS_DIR.mkdir(exist_ok=True)
+
 
 # =============================================================================
 #                           OPTIONAL DEPENDENCIES

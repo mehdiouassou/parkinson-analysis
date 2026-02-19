@@ -12,6 +12,24 @@ Parkinson Analysis Documentation
    backend/models
    backend/writers
 
+.. toctree::
+   :maxdepth: 2
+   :caption: Frontend Documentation
+
+   frontend/index
+   frontend/pages
+   frontend/components
+   frontend/utils
+
+API Endpoints (Swagger UI)
+==========================
+
+The backend provides interactive API documentation via Swagger UI.
+Once the server is running, you can access it at:
+
+- **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
+
 Introduction
 ============
 

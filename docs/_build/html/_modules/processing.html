@@ -4,7 +4,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>processing &#8212; Parkinson Dashboard 1.0.0 documentation</title>
+    <title>processing &#8212; Parkinson Analysis 1.0.0 documentation</title>
     <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
     <link rel="stylesheet" type="text/css" href="../_static/basic.css?v=686e5160" />
     <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=27fed22d" />
@@ -52,7 +52,7 @@
 <span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">datetime</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Optional</span>
 
-<span class="kn">from</span><span class="w"> </span><span class="nn">config</span><span class="w"> </span><span class="kn">import</span> <span class="n">RECORDINGS_DIR</span><span class="p">,</span> <span class="n">PROCESSED_DIR</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">config</span><span class="w"> </span><span class="kn">import</span> <span class="n">RECORDINGS_DIR</span><span class="p">,</span> <span class="n">PROCESSED_DIR</span><span class="p">,</span> <span class="n">MODELS_DIR</span>
 
 <span class="c1"># Try to import pyrealsense2 for BAG file processing</span>
 <span class="k">try</span><span class="p">:</span>
@@ -71,18 +71,18 @@
     <span class="n">HAS_GPU_AI</span> <span class="o">=</span> <span class="kc">False</span>
     <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[Processing] YOLOv8 not installed.&quot;</span><span class="p">)</span>
 
-<span class="n">MODEL_PATH</span> <span class="o">=</span> <span class="s2">&quot;yolov8n-pose.engine&quot;</span>
-<span class="k">if</span> <span class="n">HAS_GPU_AI</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">MODEL_PATH</span><span class="p">):</span>
+<span class="n">MODEL_PATH</span> <span class="o">=</span> <span class="n">MODELS_DIR</span> <span class="o">/</span> <span class="s2">&quot;yolov8n-pose.engine&quot;</span>
+<span class="k">if</span> <span class="n">HAS_GPU_AI</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">MODEL_PATH</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
     <span class="c1"># Fallback to .pt if TensorRT engine not found</span>
-    <span class="n">fallback_path</span> <span class="o">=</span> <span class="s2">&quot;yolov8n-pose.pt&quot;</span>
-    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">fallback_path</span><span class="p">):</span>
+    <span class="n">fallback_path</span> <span class="o">=</span> <span class="n">MODELS_DIR</span> <span class="o">/</span> <span class="s2">&quot;yolov8n-pose.pt&quot;</span>
+    <span class="k">if</span> <span class="n">fallback_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
         <span class="n">MODEL_PATH</span> <span class="o">=</span> <span class="n">fallback_path</span>
         <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Processing] TensorRT engine not found, falling back to </span><span class="si">{</span><span class="n">MODEL_PATH</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
     <span class="k">else</span><span class="p">:</span>
         <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Processing] Warning: Neither .engine nor .pt model found. Will attempt to download .pt on first use.&quot;</span><span class="p">)</span>
         <span class="n">MODEL_PATH</span> <span class="o">=</span> <span class="n">fallback_path</span>
 
-<span class="n">ai_model</span> <span class="o">=</span> <span class="n">YOLO</span><span class="p">(</span><span class="n">MODEL_PATH</span><span class="p">)</span> <span class="k">if</span> <span class="n">HAS_GPU_AI</span> <span class="k">else</span> <span class="kc">None</span>
+<span class="n">ai_model</span> <span class="o">=</span> <span class="n">YOLO</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">MODEL_PATH</span><span class="p">))</span> <span class="k">if</span> <span class="n">HAS_GPU_AI</span> <span class="k">else</span> <span class="kc">None</span>
 
 
 <span class="c1"># =============================================================================</span>
@@ -664,7 +664,16 @@
             <span class="k">if</span> <span class="n">job_id</span> <span class="ow">in</span> <span class="n">processing_jobs</span><span class="p">:</span>
                 <span class="n">processing_jobs</span><span class="p">[</span><span class="n">job_id</span><span class="p">][</span><span class="sa">f</span><span class="s2">&quot;camera</span><span class="si">{</span><span class="n">camera_num</span><span class="si">}</span><span class="s2">_status&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;error&quot;</span>
                 <span class="n">processing_jobs</span><span class="p">[</span><span class="n">job_id</span><span class="p">][</span><span class="sa">f</span><span class="s2">&quot;camera</span><span class="si">{</span><span class="n">camera_num</span><span class="si">}</span><span class="s2">_error&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
-                <span class="n">processing_jobs</span><span class="p">[</span><span class="n">job_id</span><span class="p">][</span><span class="s2">&quot;status&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;error&quot;</span></div>
+
+                <span class="c1"># Only mark overall job as error if the other camera is also done</span>
+                <span class="n">other_cam</span> <span class="o">=</span> <span class="mi">1</span> <span class="k">if</span> <span class="n">camera_num</span> <span class="o">==</span> <span class="mi">2</span> <span class="k">else</span> <span class="mi">2</span>
+                <span class="n">other_status</span> <span class="o">=</span> <span class="n">processing_jobs</span><span class="p">[</span><span class="n">job_id</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;camera</span><span class="si">{</span><span class="n">other_cam</span><span class="si">}</span><span class="s2">_status&quot;</span><span class="p">,</span> <span class="s2">&quot;skipped&quot;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">other_status</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;completed&quot;</span><span class="p">,</span> <span class="s2">&quot;skipped&quot;</span><span class="p">,</span> <span class="s2">&quot;error&quot;</span><span class="p">,</span> <span class="s2">&quot;cancelled&quot;</span><span class="p">):</span>
+                    <span class="c1"># Both cameras are done - mark overall based on results</span>
+                    <span class="k">if</span> <span class="n">other_status</span> <span class="o">==</span> <span class="s2">&quot;completed&quot;</span><span class="p">:</span>
+                        <span class="n">processing_jobs</span><span class="p">[</span><span class="n">job_id</span><span class="p">][</span><span class="s2">&quot;status&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;completed&quot;</span>  <span class="c1"># partial success</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="n">processing_jobs</span><span class="p">[</span><span class="n">job_id</span><span class="p">][</span><span class="s2">&quot;status&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;error&quot;</span></div>
 
 
 
@@ -760,7 +769,7 @@
       </div>
       <div class="sphinxsidebar" role="navigation" aria-label="Main">
         <div class="sphinxsidebarwrapper">
-<h1 class="logo"><a href="../index.html">Parkinson Dashboard</a></h1>
+<h1 class="logo"><a href="../index.html">Parkinson Analysis</a></h1>
 
 
 
@@ -788,6 +797,10 @@
 <li class="toctree-l1"><a class="reference internal" href="../backend/models.html">API: Data Models (Pydantic)</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../backend/writers.html">API: Writers (Video &amp; Data)</a></li>
 </ul>
+<p class="caption" role="heading"><span class="caption-text">Frontend Documentation</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../frontend/index.html">Frontend Documentation</a></li>
+</ul>
 
 <div class="relations">
 <h3>Related Topics</h3>
@@ -811,7 +824,7 @@
       <div class="clearer"></div>
     </div>
     <div class="footer">
-      &#169;2026, Parkinson Dashboard Team.
+      &#169;2026, Parkinson Analysis Team.
       
       |
       Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.1.3</a>

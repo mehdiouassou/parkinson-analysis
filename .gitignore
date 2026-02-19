@@ -9,6 +9,7 @@ venv/
 
 # Models
 models/*.engine
+models/*.pt
 models/unused/
 
 # System

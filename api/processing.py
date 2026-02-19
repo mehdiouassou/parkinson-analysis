@@ -19,7 +19,7 @@ import uuid
 from datetime import datetime
 from typing import Dict, Tuple, Optional
 
-from config import RECORDINGS_DIR, PROCESSED_DIR
+from config import RECORDINGS_DIR, PROCESSED_DIR, MODELS_DIR
 
 # Try to import pyrealsense2 for BAG file processing
 try:
@@ -38,18 +38,18 @@ except ImportError:
     HAS_GPU_AI = False
     print("[Processing] YOLOv8 not installed.")
 
-MODEL_PATH = "yolov8n-pose.engine"
-if HAS_GPU_AI and not os.path.exists(MODEL_PATH):
+MODEL_PATH = MODELS_DIR / "yolov8n-pose.engine"
+if HAS_GPU_AI and not MODEL_PATH.exists():
     # Fallback to .pt if TensorRT engine not found
-    fallback_path = "yolov8n-pose.pt"
-    if os.path.exists(fallback_path):
+    fallback_path = MODELS_DIR / "yolov8n-pose.pt"
+    if fallback_path.exists():
         MODEL_PATH = fallback_path
         print(f"[Processing] TensorRT engine not found, falling back to {MODEL_PATH}")
     else:
         print(f"[Processing] Warning: Neither .engine nor .pt model found. Will attempt to download .pt on first use.")
         MODEL_PATH = fallback_path
 
-ai_model = YOLO(MODEL_PATH) if HAS_GPU_AI else None
+ai_model = YOLO(str(MODEL_PATH)) if HAS_GPU_AI else None
 
 
 # =============================================================================
@@ -599,7 +599,16 @@ def process_video(job_id: str, camera_num: int, batch_id: str):
             if job_id in processing_jobs:
                 processing_jobs[job_id][f"camera{camera_num}_status"] = "error"
                 processing_jobs[job_id][f"camera{camera_num}_error"] = str(e)
-                processing_jobs[job_id]["status"] = "error"
+
+                # Only mark overall job as error if the other camera is also done
+                other_cam = 1 if camera_num == 2 else 2
+                other_status = processing_jobs[job_id].get(f"camera{other_cam}_status", "skipped")
+                if other_status in ("completed", "skipped", "error", "cancelled"):
+                    # Both cameras are done - mark overall based on results
+                    if other_status == "completed":
+                        processing_jobs[job_id]["status"] = "completed"  # partial success
+                    else:
+                        processing_jobs[job_id]["status"] = "error"
 
 
 # =============================================================================
