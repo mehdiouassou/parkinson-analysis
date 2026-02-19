@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>API: Configuration &#8212; Parkinson Dashboard 1.0.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/basic.css?v=686e5160" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=27fed22d" />
+    <script src="../_static/documentation_options.js?v=8d563738"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="API: Data Models (Pydantic)" href="models.html" />
+    <link rel="prev" title="API: Camera Interface (RealSense/Bag)" href="camera.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="api-configuration">
+<h1>API: Configuration<a class="headerlink" href="#api-configuration" title="Link to this heading">¶</a></h1>
+<p>Manages environment variables, directory paths, and runtime settings.</p>
+<p id="module-config">Configuration and constants for the Parkinson Camera API.</p>
+<dl>
+<dt>Environment Variables:</dt><dd><dl class="simple">
+<dt>CAMERA_MODE: Camera backend mode</dt><dd><ul class="simple">
+<li><p>auto:       Auto-detect RealSense cameras - DEFAULT</p></li>
+<li><p>mock_bag:   Use .bag file playback with pyrealsense2 (for dev)</p></li>
+<li><p>realsense:  Live RealSense cameras (desktop/laptop)</p></li>
+</ul>
+</dd>
+</dl>
+<p>BAG_FILE_CAM1: Path to .bag file for camera 1 (mock_bag mode)
+BAG_FILE_CAM2: Path to .bag file for camera 2 (mock_bag mode)</p>
+<p>REMOTE_MODE: Set to “true” for Jetson remote deployment
+API_HOST: Host for API (default localhost, use 0.0.0.0 for remote)</p>
+</dd>
+<dt>Camera Type Priority:</dt><dd><ul class="simple">
+<li><p>Camera 0 (CAM1/Front) is the first detected RealSense device</p></li>
+<li><p>Camera 1 (CAM2/Side) is the second detected RealSense device</p></li>
+</ul>
+</dd>
+<dt>Recording Behavior:</dt><dd><ul class="simple">
+<li><p>RealSense cameras: .bag (depth + RGB) + .mp4 (RGB preview)</p></li>
+<li><p>Viewing/Tagging always uses .mp4 stream</p></li>
+<li><p>Processing uses .bag (RealSense depth + RGB)</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="config.detect_realsense_devices">
+<span class="sig-prename descclassname"><span class="pre">config.</span></span><span class="sig-name descname"><span class="pre">detect_realsense_devices</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">retry_count</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">3</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">retry_delay</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1.0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/config.html#detect_realsense_devices"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#config.detect_realsense_devices" title="Link to this definition">¶</a></dt>
+<dd><p>Detect connected RealSense devices.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>retry_count</strong> – Number of times to retry detection (for slow USB init)</p></li>
+<li><p><strong>retry_delay</strong> – Seconds to wait between retries</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>[{“serial”: “…”, “name”: “…”, “usb_type”: “…”}]</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>List of dicts with device info</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="config.get_camera_type">
+<span class="sig-prename descclassname"><span class="pre">config.</span></span><span class="sig-name descname"><span class="pre">get_camera_type</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">camera_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../_modules/config.html#get_camera_type"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#config.get_camera_type" title="Link to this definition">¶</a></dt>
+<dd><p>Get the type of camera at given logical ID.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>camera_id</strong> – Camera index (0 = Front/Sagittale, 1 = Side/Frontale)</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>CAMERA_TYPE_REALSENSE or CAMERA_TYPE_BAG_FILE</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Camera type constant</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="config.get_detected_cameras">
+<span class="sig-prename descclassname"><span class="pre">config.</span></span><span class="sig-name descname"><span class="pre">get_detected_cameras</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/config.html#get_detected_cameras"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#config.get_detected_cameras" title="Link to this definition">¶</a></dt>
+<dd><p>Get all detected RealSense cameras with their logical IDs.</p>
+<dl>
+<dt>Returns mapping of camera_id -&gt; camera_info:</dt><dd><dl class="simple">
+<dt>{</dt><dd><p>0: {“type”: “realsense”, “serial”: “…”, “name”: “…”},
+1: {“type”: “realsense”, “serial”: “…”, “name”: “…”}</p>
+</dd>
+</dl>
+<p>}</p>
+</dd>
+</dl>
+<p>Camera 0 = Front/Sagittale (first detected device)
+Camera 1 = Side/Frontale  (second detected device)</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="config.get_realsense_count">
+<span class="sig-prename descclassname"><span class="pre">config.</span></span><span class="sig-name descname"><span class="pre">get_realsense_count</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span></span></span><a class="reference internal" href="../_modules/config.html#get_realsense_count"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#config.get_realsense_count" title="Link to this definition">¶</a></dt>
+<dd><p>Get the number of detected RealSense cameras.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="config.refresh_camera_detection">
+<span class="sig-prename descclassname"><span class="pre">config.</span></span><span class="sig-name descname"><span class="pre">refresh_camera_detection</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/config.html#refresh_camera_detection"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#config.refresh_camera_detection" title="Link to this definition">¶</a></dt>
+<dd><p>Force re-detection of cameras. Call when cameras may have changed.</p>
+</dd></dl>
+
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">Parkinson Dashboard</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Backend API Reference</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="main.html">API: Main Application (FastAPI)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="processing.html">API: Processing (YOLOv8 &amp; Motion)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="camera.html">API: Camera Interface (RealSense/Bag)</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">API: Configuration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#config.detect_realsense_devices"><code class="docutils literal notranslate"><span class="pre">detect_realsense_devices()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#config.get_camera_type"><code class="docutils literal notranslate"><span class="pre">get_camera_type()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#config.get_detected_cameras"><code class="docutils literal notranslate"><span class="pre">get_detected_cameras()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#config.get_realsense_count"><code class="docutils literal notranslate"><span class="pre">get_realsense_count()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#config.refresh_camera_detection"><code class="docutils literal notranslate"><span class="pre">refresh_camera_detection()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="models.html">API: Data Models (Pydantic)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="writers.html">API: Writers (Video &amp; Data)</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="camera.html" title="previous chapter">API: Camera Interface (RealSense/Bag)</a></li>
+      <li>Next: <a href="models.html" title="next chapter">API: Data Models (Pydantic)</a></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Parkinson Dashboard Team.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.1.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../_sources/backend/config.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

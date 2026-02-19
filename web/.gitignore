@@ -1,0 +1,51 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules/
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# =============================================================================
+#                     API DATA FILES (DO NOT COMMIT)
+# =============================================================================
+
+# Video recordings
+api/recordings/*.avi
+api/recordings/*.mp4
+api/recordings/*.bag
+api/recordings/*_metadata.json
+
+# Processing results
+api/processed/*.json
+
+# Tagging data
+api/tagging/*.json
+api/tagging/*.csv
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python virtual environment
+venv/
+venv311/
+.venv/

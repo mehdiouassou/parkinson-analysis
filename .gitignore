@@ -1,0 +1,25 @@
+# Node
+node_modules/
+.vite/
+
+# Python
+__pycache__/
+venv/
+*.pyc
+
+# Models
+models/*.engine
+models/unused/
+
+# System
+.DS_Store
+Thumbs.db
+
+# VSCode
+.vscode/
+
+# Build
+web/dist/
+
+# Jetson Artifacts
+jetson_agx_orin_py312_env.tar.gz

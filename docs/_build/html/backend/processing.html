@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>API: Processing (YOLOv8 &amp; Motion) &#8212; Parkinson Dashboard 1.0.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/basic.css?v=686e5160" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=27fed22d" />
+    <script src="../_static/documentation_options.js?v=8d563738"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="API: Camera Interface (RealSense/Bag)" href="camera.html" />
+    <link rel="prev" title="API: Main Application (FastAPI)" href="main.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="api-processing-yolov8-motion">
+<h1>API: Processing (YOLOv8 &amp; Motion)<a class="headerlink" href="#api-processing-yolov8-motion" title="Link to this heading">¶</a></h1>
+<p>The processing pipeline that extracts keypoints and calculates metrics from video frames.</p>
+<p id="module-processing">Video Processing Pipeline</p>
+<dl class="simple">
+<dt>Real frame-by-frame processing for Parkinson’s motion analysis:</dt><dd><ul class="simple">
+<li><p>Pose keypoint detection (17 points via YOLOv8-Pose / TensorRT)</p></li>
+<li><p>Motion detection between frames</p></li>
+<li><p>Tremor analysis (nose jitter)</p></li>
+</ul>
+</dd>
+</dl>
+<p>All metrics are computed from actual frame data using YOLOv8-Pose on GPU.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="processing.BagFileReader">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">processing.</span></span><span class="sig-name descname"><span class="pre">BagFileReader</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bag_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/processing.html#BagFileReader"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#processing.BagFileReader" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Read frames from a RealSense BAG file.
+Provides an iterator interface similar to cv2.VideoCapture.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="processing.BagFileReader.get">
+<span class="sig-name descname"><span class="pre">get</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">prop</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/processing.html#BagFileReader.get"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#processing.BagFileReader.get" title="Link to this definition">¶</a></dt>
+<dd><p>Mimic cv2.VideoCapture.get() for common properties.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="processing.BagFileReader.isOpened">
+<span class="sig-name descname"><span class="pre">isOpened</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="reference internal" href="../_modules/processing.html#BagFileReader.isOpened"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#processing.BagFileReader.isOpened" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="processing.BagFileReader.read">
+<span class="sig-name descname"><span class="pre">read</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">bool</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/processing.html#BagFileReader.read"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#processing.BagFileReader.read" title="Link to this definition">¶</a></dt>
+<dd><p>Read next frame, returns (success, frame) like cv2.VideoCapture.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="processing.BagFileReader.release">
+<span class="sig-name descname"><span class="pre">release</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/processing.html#BagFileReader.release"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#processing.BagFileReader.release" title="Link to this definition">¶</a></dt>
+<dd><p>Stop pipeline and cleanup.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="processing.analyze_tremor_yolo">
+<span class="sig-prename descclassname"><span class="pre">processing.</span></span><span class="sig-name descname"><span class="pre">analyze_tremor_yolo</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">history</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">float</span></span></span><a class="reference internal" href="../_modules/processing.html#analyze_tremor_yolo"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#processing.analyze_tremor_yolo" title="Link to this definition">¶</a></dt>
+<dd><p>Simple tremor detection based on Nose X/Y movement variance (jitter).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="processing.calculate_keypoint_motion">
+<span class="sig-prename descclassname"><span class="pre">processing.</span></span><span class="sig-name descname"><span class="pre">calculate_keypoint_motion</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">prev_landmarks</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">curr_landmarks</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span></span></span><a class="reference internal" href="../_modules/processing.html#calculate_keypoint_motion"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#processing.calculate_keypoint_motion" title="Link to this definition">¶</a></dt>
+<dd><p>Calculate motion between two frames based on YOLO keypoint positions.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Dictionary with total, average, and max motion across tracked keypoints.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="processing.cancel_job">
+<span class="sig-prename descclassname"><span class="pre">processing.</span></span><span class="sig-name descname"><span class="pre">cancel_job</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">job_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="reference internal" href="../_modules/processing.html#cancel_job"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#processing.cancel_job" title="Link to this definition">¶</a></dt>
+<dd><p>Cancel a processing job.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="processing.check_job_cancelled">
+<span class="sig-prename descclassname"><span class="pre">processing.</span></span><span class="sig-name descname"><span class="pre">check_job_cancelled</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">job_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="reference internal" href="../_modules/processing.html#check_job_cancelled"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#processing.check_job_cancelled" title="Link to this definition">¶</a></dt>
+<dd><p>Check if job was cancelled.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="processing.create_processing_job">
+<span class="sig-prename descclassname"><span class="pre">processing.</span></span><span class="sig-name descname"><span class="pre">create_processing_job</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">batch_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">has_cam1</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">has_cam2</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../_modules/processing.html#create_processing_job"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#processing.create_processing_job" title="Link to this definition">¶</a></dt>
+<dd><p>Create a new processing job.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>batch_id</strong> – Video batch ID</p></li>
+<li><p><strong>has_cam1</strong> – Whether camera 1 file exists</p></li>
+<li><p><strong>has_cam2</strong> – Whether camera 2 file exists</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Job ID</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="processing.extract_yolo_landmarks">
+<span class="sig-prename descclassname"><span class="pre">processing.</span></span><span class="sig-name descname"><span class="pre">extract_yolo_landmarks</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">results</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/processing.html#extract_yolo_landmarks"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#processing.extract_yolo_landmarks" title="Link to this definition">¶</a></dt>
+<dd><p>Extract pose keypoints from YOLOv8-Pose results.</p>
+<p>YOLO Pose returns 17 keypoints per person.
+Indices: 0:Nose, 1:L-Eye, 2:R-Eye, 3:L-Ear, 4:R-Ear</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Dictionary with named keypoint groups, or None if no person detected.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="processing.get_all_jobs">
+<span class="sig-prename descclassname"><span class="pre">processing.</span></span><span class="sig-name descname"><span class="pre">get_all_jobs</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span></span></span><a class="reference internal" href="../_modules/processing.html#get_all_jobs"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#processing.get_all_jobs" title="Link to this definition">¶</a></dt>
+<dd><p>Get all processing jobs.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="processing.get_job">
+<span class="sig-prename descclassname"><span class="pre">processing.</span></span><span class="sig-name descname"><span class="pre">get_job</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">job_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span></span></span><a class="reference internal" href="../_modules/processing.html#get_job"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#processing.get_job" title="Link to this definition">¶</a></dt>
+<dd><p>Get processing job by ID.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="processing.is_batch_processing">
+<span class="sig-prename descclassname"><span class="pre">processing.</span></span><span class="sig-name descname"><span class="pre">is_batch_processing</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">batch_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span></span></span><a class="reference internal" href="../_modules/processing.html#is_batch_processing"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#processing.is_batch_processing" title="Link to this definition">¶</a></dt>
+<dd><p>Check if batch is already being processed.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="processing.process_video">
+<span class="sig-prename descclassname"><span class="pre">processing.</span></span><span class="sig-name descname"><span class="pre">process_video</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">job_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">camera_num</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">batch_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/processing.html#process_video"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#processing.process_video" title="Link to this definition">¶</a></dt>
+<dd><p>Process a video file with real frame-by-frame analysis.</p>
+<dl class="simple">
+<dt>Processing Pipeline:</dt><dd><ol class="arabic simple">
+<li><p>Load video and metadata</p></li>
+<li><p>Apply warm color filter to each frame</p></li>
+<li><p>Calculate per-frame metrics (brightness, color, edges)</p></li>
+<li><p>Calculate inter-frame motion</p></li>
+<li><p>Detect tremor patterns from motion history</p></li>
+<li><p>Aggregate all metrics into final report</p></li>
+</ol>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>job_id</strong> – Processing job identifier</p></li>
+<li><p><strong>camera_num</strong> – Camera number (1 or 2)</p></li>
+<li><p><strong>batch_id</strong> – Video batch ID (timestamp prefix)</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="processing.update_job_progress">
+<span class="sig-prename descclassname"><span class="pre">processing.</span></span><span class="sig-name descname"><span class="pre">update_job_progress</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">job_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">camera_num</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">progress</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">step_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/processing.html#update_job_progress"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#processing.update_job_progress" title="Link to this definition">¶</a></dt>
+<dd><p>Update processing job progress.</p>
+</dd></dl>
+
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">Parkinson Dashboard</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Backend API Reference</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="main.html">API: Main Application (FastAPI)</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">API: Processing (YOLOv8 &amp; Motion)</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#processing.BagFileReader"><code class="docutils literal notranslate"><span class="pre">BagFileReader</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#processing.analyze_tremor_yolo"><code class="docutils literal notranslate"><span class="pre">analyze_tremor_yolo()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#processing.calculate_keypoint_motion"><code class="docutils literal notranslate"><span class="pre">calculate_keypoint_motion()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#processing.cancel_job"><code class="docutils literal notranslate"><span class="pre">cancel_job()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#processing.check_job_cancelled"><code class="docutils literal notranslate"><span class="pre">check_job_cancelled()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#processing.create_processing_job"><code class="docutils literal notranslate"><span class="pre">create_processing_job()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#processing.extract_yolo_landmarks"><code class="docutils literal notranslate"><span class="pre">extract_yolo_landmarks()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#processing.get_all_jobs"><code class="docutils literal notranslate"><span class="pre">get_all_jobs()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#processing.get_job"><code class="docutils literal notranslate"><span class="pre">get_job()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#processing.is_batch_processing"><code class="docutils literal notranslate"><span class="pre">is_batch_processing()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#processing.process_video"><code class="docutils literal notranslate"><span class="pre">process_video()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#processing.update_job_progress"><code class="docutils literal notranslate"><span class="pre">update_job_progress()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="camera.html">API: Camera Interface (RealSense/Bag)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="config.html">API: Configuration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="models.html">API: Data Models (Pydantic)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="writers.html">API: Writers (Video &amp; Data)</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="main.html" title="previous chapter">API: Main Application (FastAPI)</a></li>
+      <li>Next: <a href="camera.html" title="next chapter">API: Camera Interface (RealSense/Bag)</a></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Parkinson Dashboard Team.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.1.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../_sources/backend/processing.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

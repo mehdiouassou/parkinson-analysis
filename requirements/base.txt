@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+imageio-ffmpeg
+numpy
+ultralytics

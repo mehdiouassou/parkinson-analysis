@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>writers &#8212; Parkinson Dashboard 1.0.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/basic.css?v=686e5160" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=27fed22d" />
+    <script src="../_static/documentation_options.js?v=8d563738"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for writers</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Video Writer Factory</span>
+
+<span class="sd">Creates appropriate video writers for RealSense-only recording:</span>
+<span class="sd">    - BAG (RealSense): Full depth + RGB data for processing</span>
+<span class="sd">    - MP4 (H.264): Compressed RGB, browser-compatible, for viewing/tagging</span>
+
+<span class="sd">Recording Behavior:</span>
+<span class="sd">    - RealSense cameras: .bag (depth + RGB) + .mp4 (RGB preview)</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">cv2</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">subprocess</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">threading</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Union</span><span class="p">,</span> <span class="n">Optional</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">config</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">CAMERA_MODE</span><span class="p">,</span>
+    <span class="n">FFMPEG_AVAILABLE</span><span class="p">,</span>
+    <span class="n">imageio_ffmpeg</span><span class="p">,</span>
+    <span class="n">REALSENSE_AVAILABLE</span><span class="p">,</span>
+    <span class="n">rs</span><span class="p">,</span>
+    <span class="n">CAMERA_TYPE_REALSENSE</span><span class="p">,</span>
+<span class="p">)</span>
+
+
+<span class="c1"># =============================================================================</span>
+<span class="c1">#                         BAG WRITER (REALSENSE DEPTH + RGB)</span>
+<span class="c1"># =============================================================================</span>
+
+<div class="viewcode-block" id="BagWriter">
+<a class="viewcode-back" href="../backend/writers.html#writers.BagWriter">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">BagWriter</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    RealSense BAG file writer for recording depth + RGB data.</span>
+
+<span class="sd">    Uses the RealSense SDK&#39;s built-in recording capability.</span>
+<span class="sd">    BAG files are used for processing (contains depth data for gait analysis).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">filepath</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">pipeline</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initialize BAG writer.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            filepath: Output file path (should end in .bag)</span>
+<span class="sd">            pipeline: Active RealSense pipeline (must be started first)</span>
+<span class="sd">            config: Optional RealSense config for recording settings</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">filepath</span> <span class="o">=</span> <span class="n">filepath</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pipeline</span> <span class="o">=</span> <span class="n">pipeline</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">recorder</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_opened</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_lock</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">REALSENSE_AVAILABLE</span> <span class="ow">or</span> <span class="n">pipeline</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Writer] BAG recording not available: RealSense=</span><span class="si">{</span><span class="n">REALSENSE_AVAILABLE</span><span class="si">}</span><span class="s2">, pipeline=</span><span class="si">{</span><span class="n">pipeline</span><span class="w"> </span><span class="ow">is</span><span class="w"> </span><span class="ow">not</span><span class="w"> </span><span class="kc">None</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">return</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">profile</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">get_active_profile</span><span class="p">()</span>
+            <span class="n">device</span> <span class="o">=</span> <span class="n">profile</span><span class="o">.</span><span class="n">get_device</span><span class="p">()</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">recorder</span> <span class="o">=</span> <span class="n">device</span><span class="o">.</span><span class="n">as_recorder</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">recorder</span><span class="o">.</span><span class="n">pause</span><span class="p">()</span>  <span class="c1"># Start paused, call resume() when ready</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">_opened</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Writer] BAG recording initialized: </span><span class="si">{</span><span class="n">filepath</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Writer] BAG initialization failed: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_opened</span> <span class="o">=</span> <span class="kc">False</span>
+
+<div class="viewcode-block" id="BagWriter.isOpened">
+<a class="viewcode-back" href="../backend/writers.html#writers.BagWriter.isOpened">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">isOpened</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Check if writer is ready.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_opened</span></div>
+
+
+<div class="viewcode-block" id="BagWriter.start_recording">
+<a class="viewcode-back" href="../backend/writers.html#writers.BagWriter.start_recording">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">start_recording</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Start/resume recording.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">recorder</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">recorder</span><span class="o">.</span><span class="n">resume</span><span class="p">()</span>
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Writer] BAG resume error: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="BagWriter.pause_recording">
+<a class="viewcode-back" href="../backend/writers.html#writers.BagWriter.pause_recording">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">pause_recording</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Pause recording.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">recorder</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">recorder</span><span class="o">.</span><span class="n">pause</span><span class="p">()</span>
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Writer] BAG pause error: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="BagWriter.write">
+<a class="viewcode-back" href="../backend/writers.html#writers.BagWriter.write">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">write</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">frame</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Note: BAG files record automatically from pipeline.</span>
+<span class="sd">        This method is a no-op for API compatibility.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">pass</span></div>
+
+
+<div class="viewcode-block" id="BagWriter.release">
+<a class="viewcode-back" href="../backend/writers.html#writers.BagWriter.release">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">release</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Stop recording and close the BAG file.&quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_lock</span><span class="p">:</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">recorder</span><span class="p">:</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">recorder</span><span class="o">.</span><span class="n">pause</span><span class="p">()</span>
+                <span class="k">except</span><span class="p">:</span>
+                    <span class="k">pass</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">recorder</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_opened</span> <span class="o">=</span> <span class="kc">False</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="create_bag_writer">
+<a class="viewcode-back" href="../backend/writers.html#writers.create_bag_writer">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">create_bag_writer</span><span class="p">(</span><span class="n">filepath</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">pipeline</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">BagWriter</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Create BAG writer for RealSense recording.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        filepath: Output file path (should end in .bag)</span>
+<span class="sd">        pipeline: Active RealSense pipeline</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        BagWriter instance or None if not available</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">REALSENSE_AVAILABLE</span> <span class="ow">or</span> <span class="n">pipeline</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">writer</span> <span class="o">=</span> <span class="n">BagWriter</span><span class="p">(</span><span class="n">filepath</span><span class="p">,</span> <span class="n">pipeline</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">writer</span><span class="o">.</span><span class="n">isOpened</span><span class="p">():</span>
+            <span class="k">return</span> <span class="n">writer</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Writer] Failed to create BAG writer: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="kc">None</span></div>
+
+
+
+<div class="viewcode-block" id="start_realsense_recording">
+<a class="viewcode-back" href="../backend/writers.html#writers.start_realsense_recording">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">start_realsense_recording</span><span class="p">(</span><span class="n">filepath</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">serial</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">any</span><span class="p">,</span> <span class="nb">any</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Start a new RealSense pipeline configured for BAG recording.</span>
+
+<span class="sd">    This is the recommended way to record BAG files - start a new pipeline</span>
+<span class="sd">    with recording enabled from the beginning.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        filepath: Output .bag file path</span>
+<span class="sd">        serial: Optional device serial number</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        Tuple of (pipeline, config) or (None, None) on failure</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">REALSENSE_AVAILABLE</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">pipeline</span> <span class="o">=</span> <span class="n">rs</span><span class="o">.</span><span class="n">pipeline</span><span class="p">()</span>
+        <span class="n">config</span> <span class="o">=</span> <span class="n">rs</span><span class="o">.</span><span class="n">config</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="n">serial</span><span class="p">:</span>
+            <span class="n">config</span><span class="o">.</span><span class="n">enable_device</span><span class="p">(</span><span class="n">serial</span><span class="p">)</span>
+
+        <span class="n">config</span><span class="o">.</span><span class="n">enable_stream</span><span class="p">(</span><span class="n">rs</span><span class="o">.</span><span class="n">stream</span><span class="o">.</span><span class="n">color</span><span class="p">,</span> <span class="mi">640</span><span class="p">,</span> <span class="mi">480</span><span class="p">,</span> <span class="n">rs</span><span class="o">.</span><span class="n">format</span><span class="o">.</span><span class="n">bgr8</span><span class="p">,</span> <span class="mi">60</span><span class="p">)</span>
+        <span class="n">config</span><span class="o">.</span><span class="n">enable_stream</span><span class="p">(</span><span class="n">rs</span><span class="o">.</span><span class="n">stream</span><span class="o">.</span><span class="n">depth</span><span class="p">,</span> <span class="mi">640</span><span class="p">,</span> <span class="mi">480</span><span class="p">,</span> <span class="n">rs</span><span class="o">.</span><span class="n">format</span><span class="o">.</span><span class="n">z16</span><span class="p">,</span> <span class="mi">60</span><span class="p">)</span>
+
+        <span class="n">config</span><span class="o">.</span><span class="n">enable_record_to_file</span><span class="p">(</span><span class="n">filepath</span><span class="p">)</span>
+
+        <span class="n">profile</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">start</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Writer] RealSense recording started: </span><span class="si">{</span><span class="n">filepath</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">pipeline</span><span class="p">,</span> <span class="n">profile</span>
+
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Writer] Failed to start RealSense recording: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span></div>
+
+
+
+<div class="viewcode-block" id="stop_realsense_recording">
+<a class="viewcode-back" href="../backend/writers.html#writers.stop_realsense_recording">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">stop_realsense_recording</span><span class="p">(</span><span class="n">pipeline</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Stop RealSense pipeline recording.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        pipeline: Active recording pipeline</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        True if stopped successfully</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">pipeline</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">pipeline</span><span class="o">.</span><span class="n">stop</span><span class="p">()</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[Writer] RealSense recording stopped&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Writer] Error stopping RealSense recording: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">False</span></div>
+
+
+
+<span class="c1"># =============================================================================</span>
+<span class="c1">#                          FFMPEG WRITER (RECOMMENDED MP4)</span>
+<span class="c1"># =============================================================================</span>
+
+<div class="viewcode-block" id="FFmpegWriter">
+<a class="viewcode-back" href="../backend/writers.html#writers.FFmpegWriter">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">FFmpegWriter</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    FFmpeg-based video writer for browser-compatible H.264 MP4.</span>
+
+<span class="sd">    Uses libx264 encoder piped through stdin for reliable browser playback.</span>
+<span class="sd">    This is the recommended writer for MP4 files.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">filepath</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">frame_size</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="n">fps</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">30</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">filepath</span> <span class="o">=</span> <span class="n">filepath</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">width</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">height</span> <span class="o">=</span> <span class="n">frame_size</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">fps</span> <span class="o">=</span> <span class="n">fps</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">process</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_opened</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_start</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_start</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Start FFmpeg subprocess.&quot;&quot;&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">ffmpeg_exe</span> <span class="o">=</span> <span class="n">imageio_ffmpeg</span><span class="o">.</span><span class="n">get_ffmpeg_exe</span><span class="p">()</span>
+            <span class="n">cmd</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="n">ffmpeg_exe</span><span class="p">,</span>
+                <span class="s1">&#39;-y&#39;</span><span class="p">,</span>                          <span class="c1"># Overwrite output</span>
+                <span class="s1">&#39;-f&#39;</span><span class="p">,</span> <span class="s1">&#39;rawvideo&#39;</span><span class="p">,</span>              <span class="c1"># Input format</span>
+                <span class="s1">&#39;-vcodec&#39;</span><span class="p">,</span> <span class="s1">&#39;rawvideo&#39;</span><span class="p">,</span>         <span class="c1"># Input codec</span>
+                <span class="s1">&#39;-s&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">width</span><span class="si">}</span><span class="s1">x</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">height</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span>  <span class="c1"># Frame size</span>
+                <span class="s1">&#39;-pix_fmt&#39;</span><span class="p">,</span> <span class="s1">&#39;bgr24&#39;</span><span class="p">,</span>           <span class="c1"># BGR from OpenCV</span>
+                <span class="s1">&#39;-r&#39;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">fps</span><span class="p">),</span>           <span class="c1"># Frame rate</span>
+                <span class="s1">&#39;-i&#39;</span><span class="p">,</span> <span class="s1">&#39;-&#39;</span><span class="p">,</span>                     <span class="c1"># Read from stdin</span>
+                <span class="s1">&#39;-c:v&#39;</span><span class="p">,</span> <span class="s1">&#39;libx264&#39;</span><span class="p">,</span>             <span class="c1"># H.264 encoder</span>
+                <span class="s1">&#39;-preset&#39;</span><span class="p">,</span> <span class="s1">&#39;fast&#39;</span><span class="p">,</span>             <span class="c1"># Encoding speed</span>
+                <span class="s1">&#39;-crf&#39;</span><span class="p">,</span> <span class="s1">&#39;23&#39;</span><span class="p">,</span>                  <span class="c1"># Quality (lower = better)</span>
+                <span class="s1">&#39;-pix_fmt&#39;</span><span class="p">,</span> <span class="s1">&#39;yuv420p&#39;</span><span class="p">,</span>         <span class="c1"># Browser-compatible pixel format</span>
+                <span class="s1">&#39;-movflags&#39;</span><span class="p">,</span> <span class="s1">&#39;+faststart&#39;</span><span class="p">,</span>     <span class="c1"># Enable streaming</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">filepath</span>
+            <span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">process</span> <span class="o">=</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">Popen</span><span class="p">(</span>
+                <span class="n">cmd</span><span class="p">,</span>
+                <span class="n">stdin</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">PIPE</span><span class="p">,</span>
+                <span class="n">stdout</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">DEVNULL</span><span class="p">,</span>
+                <span class="n">stderr</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">DEVNULL</span>
+            <span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_opened</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Writer] FFmpeg H.264 encoding: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">filepath</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Writer] FFmpeg failed: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_opened</span> <span class="o">=</span> <span class="kc">False</span>
+
+<div class="viewcode-block" id="FFmpegWriter.isOpened">
+<a class="viewcode-back" href="../backend/writers.html#writers.FFmpegWriter.isOpened">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">isOpened</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Check if writer is ready.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_opened</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">process</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span></div>
+
+
+<div class="viewcode-block" id="FFmpegWriter.write">
+<a class="viewcode-back" href="../backend/writers.html#writers.FFmpegWriter.write">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">write</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">frame</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Write a frame to FFmpeg stdin.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">process</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">process</span><span class="o">.</span><span class="n">stdin</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">process</span><span class="o">.</span><span class="n">stdin</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">frame</span><span class="o">.</span><span class="n">tobytes</span><span class="p">())</span>
+            <span class="k">except</span> <span class="p">(</span><span class="ne">BrokenPipeError</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">):</span>
+                <span class="k">pass</span></div>
+
+
+<div class="viewcode-block" id="FFmpegWriter.release">
+<a class="viewcode-back" href="../backend/writers.html#writers.FFmpegWriter.release">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">release</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Close FFmpeg process.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">process</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">process</span><span class="o">.</span><span class="n">stdin</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">process</span><span class="o">.</span><span class="n">stdin</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">process</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+            <span class="k">except</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">process</span><span class="o">.</span><span class="n">kill</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">process</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_opened</span> <span class="o">=</span> <span class="kc">False</span></div>
+</div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_create_mp4_writer_opencv</span><span class="p">(</span><span class="n">filepath</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">frame_size</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="n">fps</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">30</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">cv2</span><span class="o">.</span><span class="n">VideoWriter</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Create MP4 video writer using OpenCV (fallback when FFmpeg unavailable).</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        filepath: Output file path (should end in .mp4)</span>
+<span class="sd">        frame_size: (width, height) tuple</span>
+<span class="sd">        fps: Frames per second</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        cv2.VideoWriter instance</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">width</span><span class="p">,</span> <span class="n">height</span> <span class="o">=</span> <span class="n">frame_size</span>
+
+    <span class="k">for</span> <span class="n">codec</span> <span class="ow">in</span> <span class="p">[</span><span class="s1">&#39;avc1&#39;</span><span class="p">,</span> <span class="s1">&#39;H264&#39;</span><span class="p">,</span> <span class="s1">&#39;X264&#39;</span><span class="p">,</span> <span class="s1">&#39;mp4v&#39;</span><span class="p">]:</span>
+        <span class="n">fourcc</span> <span class="o">=</span> <span class="n">cv2</span><span class="o">.</span><span class="n">VideoWriter_fourcc</span><span class="p">(</span><span class="o">*</span><span class="n">codec</span><span class="p">)</span>
+        <span class="n">writer</span> <span class="o">=</span> <span class="n">cv2</span><span class="o">.</span><span class="n">VideoWriter</span><span class="p">(</span><span class="n">filepath</span><span class="p">,</span> <span class="n">fourcc</span><span class="p">,</span> <span class="n">fps</span><span class="p">,</span> <span class="p">(</span><span class="n">width</span><span class="p">,</span> <span class="n">height</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">writer</span><span class="o">.</span><span class="n">isOpened</span><span class="p">():</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Writer] OpenCV </span><span class="si">{</span><span class="n">codec</span><span class="si">}</span><span class="s2"> encoding: </span><span class="si">{</span><span class="n">filepath</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">writer</span>
+        <span class="n">writer</span><span class="o">.</span><span class="n">release</span><span class="p">()</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Writer] Warning: No H.264 codec available, using default: </span><span class="si">{</span><span class="n">filepath</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">cv2</span><span class="o">.</span><span class="n">VideoWriter</span><span class="p">(</span><span class="n">filepath</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">fps</span><span class="p">,</span> <span class="p">(</span><span class="n">width</span><span class="p">,</span> <span class="n">height</span><span class="p">))</span>
+
+
+<div class="viewcode-block" id="create_mp4_writer">
+<a class="viewcode-back" href="../backend/writers.html#writers.create_mp4_writer">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">create_mp4_writer</span><span class="p">(</span><span class="n">filepath</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">frame_size</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="n">fps</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">30</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Union</span><span class="p">[</span><span class="n">FFmpegWriter</span><span class="p">,</span> <span class="n">cv2</span><span class="o">.</span><span class="n">VideoWriter</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Create MP4 video writer for browser-compatible H.264.</span>
+
+<span class="sd">    Prefers FFmpeg (more reliable) with OpenCV fallback.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        filepath: Output file path (should end in .mp4)</span>
+<span class="sd">        frame_size: (width, height) tuple</span>
+<span class="sd">        fps: Frames per second</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        FFmpegWriter or cv2.VideoWriter instance</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">FFMPEG_AVAILABLE</span><span class="p">:</span>
+        <span class="n">writer</span> <span class="o">=</span> <span class="n">FFmpegWriter</span><span class="p">(</span><span class="n">filepath</span><span class="p">,</span> <span class="n">frame_size</span><span class="p">,</span> <span class="n">fps</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">writer</span><span class="o">.</span><span class="n">isOpened</span><span class="p">():</span>
+            <span class="k">return</span> <span class="n">writer</span>
+
+    <span class="k">return</span> <span class="n">_create_mp4_writer_opencv</span><span class="p">(</span><span class="n">filepath</span><span class="p">,</span> <span class="n">frame_size</span><span class="p">,</span> <span class="n">fps</span><span class="p">)</span></div>
+
+
+
+<span class="c1"># =============================================================================</span>
+<span class="c1">#                              WRITER SELECTOR</span>
+<span class="c1"># =============================================================================</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">_BagWriterWrapper</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Wrapper that provides VideoWriter-like interface for BAG recording.</span>
+<span class="sd">    BAG recording happens automatically via the pipeline.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pipeline</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pipeline</span> <span class="o">=</span> <span class="n">pipeline</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_opened</span> <span class="o">=</span> <span class="n">pipeline</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">isOpened</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_opened</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">write</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">frame</span><span class="p">):</span>
+        <span class="c1"># BAG records automatically from pipeline, no explicit write needed</span>
+        <span class="k">pass</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">release</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">pipeline</span><span class="p">:</span>
+            <span class="n">stop_realsense_recording</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">pipeline</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">pipeline</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_opened</span> <span class="o">=</span> <span class="kc">False</span>
+
+
+<div class="viewcode-block" id="create_high_quality_writer">
+<a class="viewcode-back" href="../backend/writers.html#writers.create_high_quality_writer">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">create_high_quality_writer</span><span class="p">(</span><span class="n">filepath</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">frame_size</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="n">fps</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                                <span class="n">camera_type</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">pipeline</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">serial</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Create BAG writer for RealSense recording.</span>
+
+<span class="sd">    Only BAG format is supported (no AVI fallback). Returns None writer</span>
+<span class="sd">    on failure so the caller can handle the error gracefully.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        filepath: Base output path (extension will be set to .bag automatically)</span>
+<span class="sd">        frame_size: (width, height) tuple</span>
+<span class="sd">        fps: Frames per second</span>
+<span class="sd">        camera_type: Expected to be CAMERA_TYPE_REALSENSE</span>
+<span class="sd">        pipeline: Unused (kept for API compatibility)</span>
+<span class="sd">        serial: RealSense device serial number</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        Tuple of (writer, actual_filepath, recording_pipeline)</span>
+<span class="sd">        writer is None if BAG recording failed.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">bag_filepath</span> <span class="o">=</span> <span class="n">filepath</span><span class="o">.</span><span class="n">rsplit</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="s1">&#39;.bag&#39;</span>
+
+    <span class="n">rec_pipeline</span><span class="p">,</span> <span class="n">rec_profile</span> <span class="o">=</span> <span class="n">start_realsense_recording</span><span class="p">(</span><span class="n">bag_filepath</span><span class="p">,</span> <span class="n">serial</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">rec_pipeline</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_BagWriterWrapper</span><span class="p">(</span><span class="n">rec_pipeline</span><span class="p">),</span> <span class="n">bag_filepath</span><span class="p">,</span> <span class="n">rec_pipeline</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Writer] BAG recording failed for </span><span class="si">{</span><span class="n">bag_filepath</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="n">bag_filepath</span><span class="p">,</span> <span class="kc">None</span></div>
+
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">Parkinson Dashboard</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Backend API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../backend/main.html">API: Main Application (FastAPI)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/processing.html">API: Processing (YOLOv8 &amp; Motion)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/camera.html">API: Camera Interface (RealSense/Bag)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/config.html">API: Configuration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/models.html">API: Data Models (Pydantic)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/writers.html">API: Writers (Video &amp; Data)</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Parkinson Dashboard Team.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.1.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>
