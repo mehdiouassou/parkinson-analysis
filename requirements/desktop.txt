@@ -1,0 +1,18 @@
+# --- GPU SUPPORT (NVIDIA RTX) ---
+# NOTE: If pip keeps installing the CPU version, run this manually first:
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+--extra-index-url https://download.pytorch.org/whl/cu121
+
+torch
+torchvision
+torchaudio
+
+# --- APP DEPENDENCIES ---
+-r base.txt
+
+ultralytics
+opencv-python
+pyrealsense2
+onnx
+onnxruntime-gpu

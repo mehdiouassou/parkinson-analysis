@@ -1,0 +1,14 @@
+-r base.txt
+
+# --- HARDWARE SPECIFIC ---
+# Do NOT include torch/torchvision here (Installed via NVIDIA wheels)
+# Do NOT include pyrealsense2 here (Compiled manually)
+# Do NOT include tensorrt here (Copied from system)
+
+# --- INFERENCE ---
+# We list opencv because we installed the CPU version via pip to satisfy YOLO
+opencv-python
+
+# Ultralytics (YOLO)
+# Note: If installing fresh, use: pip install ultralytics --no-deps
+ultralytics

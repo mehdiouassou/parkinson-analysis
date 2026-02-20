@@ -1,0 +1,92 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Clinical Design System Variables */
+:root {
+  /* Backgrounds */
+  --bg-main: #F4F6F8;
+  --bg-card: #FFFFFF;
+  --border-color: #E0E0E0;
+  
+  /* Text */
+  --text-primary: #1F2937;
+  --text-secondary: #6B7280;
+  
+  /* Brand - NHS Blue */
+  --brand-color: #005EB8;
+  --brand-hover: #004B93;
+  
+  /* Status */
+  --status-record: #D92D20;
+  --status-ready: #039855;
+  --status-warning: #DC6803;
+}
+
+.dark {
+  --bg-main: #121212;
+  --bg-card: #1E1E1E;
+  --border-color: #2E2E2E;
+  --text-primary: #E0E0E0;
+  --text-secondary: #9CA3AF;
+}
+
+/* Base styles - Medical UI optimized for various screen sizes */
+html {
+  font-size: 16px; /* Base 16px for clinical environments */
+  height: 100%;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 1rem; /* 16px base */
+  line-height: 1.6;
+  height: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  height: 100%;
+}
+
+/* Medical Input Standards - taller, easier to target */
+input, select, textarea {
+  min-height: 44px;
+  font-size: 1rem;
+}
+
+/* Table rows - expanded for data visibility */
+td, th {
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+}
+
+/* Toast slide-in animation */
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in {
+  animation: slide-in 0.3s ease-out forwards;
+}
+
+/* Clinical UI utilities */
+@layer utilities {
+  .clinical-shadow {
+    box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.05);
+  }
+  
+  .clinical-shadow-lg {
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+  }
+}

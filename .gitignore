@@ -1,0 +1,45 @@
+# Node
+node_modules/
+.vite/
+
+# Python
+__pycache__/
+venv/
+*.pyc
+
+# Models
+models/*.engine
+models/*.pt
+models/unused/
+
+# System
+.DS_Store
+Thumbs.db
+
+# VSCode
+.vscode/
+
+# Build
+web/dist/
+
+# Jetson Artifacts
+jetson_agx_orin_py312_env.tar.gz
+
+# Ignore data directories content
+api/recordings/*
+api/processed/*
+api/tagging/*
+
+# Keep the folders themselves (optional, requires .gitkeep files inside)
+!api/recordings/.gitkeep
+!api/processed/.gitkeep
+!api/tagging/.gitkeep
+
+# Ignore specific file types everywhere just in case
+*.mp4
+*.bag
+*.engine
+__pycache__/
+venv/
+node_modules/
+.DS_Store

@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+imageio-ffmpeg
+numpy==1.23.5
+psutil
+pyyaml
+requests
+tqdm
+pandas
+seaborn
+matplotlib
+scipy
