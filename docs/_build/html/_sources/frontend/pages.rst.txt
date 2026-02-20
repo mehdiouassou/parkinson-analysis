@@ -84,7 +84,7 @@ Tagging
       :param string filename: Video filename.
       :returns: ``'sagittale'`` | ``'frontale'`` | ``null``
 
-      Infers camera view from the filename suffix (``_camera1`` → sagittale, ``_camera2`` → frontale).
+      Infers camera view from the filename suffix (``_camera1`` → frontale, ``_camera2`` → sagittale).
 
 Processing
 ----------

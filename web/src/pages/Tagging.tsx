@@ -179,9 +179,9 @@ export default function Tagging() {
   const detectCameraType = (filename: string): CameraType => {
     // filename format: YYYY-MM-DD_HH-MM-SS_camera1or2.mp4
     if (filename.includes('_camera1.')) {
-      return 'sagittale'; // side view. left and right
-    } else if (filename.includes('_camera2.')) {
       return 'frontale'; // front view. far and near
+    } else if (filename.includes('_camera2.')) {
+      return 'sagittale'; // side view. left and right
     }
     return null;
   };
@@ -261,9 +261,9 @@ export default function Tagging() {
       }
       // Override camera type with authoritative value from metadata sidecar
       if (data.camera_view === 'Front') {
-        setCameraType('sagittale');
-      } else if (data.camera_view === 'Side') {
         setCameraType('frontale');
+      } else if (data.camera_view === 'Side') {
+        setCameraType('sagittale');
       }
     } catch {
       if (mountedRef.current) setPatientInfo(null);
@@ -455,7 +455,7 @@ export default function Tagging() {
                   ? 'bg-clinical-blue/10 text-clinical-blue border-clinical-blue/30'
                   : 'bg-clinical-ready/10 text-clinical-ready border-clinical-ready/30'
               }`}>
-                {cameraType === 'sagittale' ? 'Cam 1 — Lateral/Sagittal (Left/Right)' : 'Cam 2 — Frontal (Far/Near)'}
+                {cameraType === 'frontale' ? 'Cam 1 — Frontal (Far/Near)' : 'Cam 2 — Lateral/Sagittal (Left/Right)'}
               </span>
             )}
             {/* Patient info — prefer metadata fetched on select, fall back to list data */}

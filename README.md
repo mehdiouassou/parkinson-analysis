@@ -81,7 +81,7 @@ Each session writes files named `<timestamp>_camera{1|2}.*` under `api/recording
 | `_camera1.mp4` / `_camera2.mp4` | RGB preview, used for tagging |
 | `_camera1_metadata.json` | Patient info sidecar (name, ID, timestamp) |
 
-Camera 1 = Front/Sagittale, Camera 2 = Side/Frontale.
+Camera 1 = Front/Frontale, Camera 2 = Side/Sagittale.
 
 If only one camera is connected, only that camera's files are written (orphan mode). The camera swap button on the recording page remaps which physical device is treated as camera 1.
 
