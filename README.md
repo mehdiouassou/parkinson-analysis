@@ -1,44 +1,39 @@
 # Parkinson Analysis
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/mehdiouassou/parkinson-analysis)
-[![Smoke Tests](https://img.shields.io/badge/smoke%20tests-passing-brightgreen)](https://github.com/mehdiouassou/parkinson-analysis)
-[![Code Coverage](https://img.shields.io/badge/coverage-93%25-brightgreen)](https://github.com/mehdiouassou/parkinson-analysis)
+A dual-camera motion analysis tool for Parkinson's assessment. Records synchronized video from two Intel RealSense cameras, runs YOLOv8-Pose on each recording to extract skeletal keypoints, and outputs per-session JSON reports with motion and tremor metrics.
 
-The Parkinson Analysis project is a computer vision tool for analyzing patient motion to provide valuable clinical insights.
+Designed to run on an NVIDIA Jetson for real-time edge inference, with a React dashboard for recording, tagging, and file management.
 
-This tool utilizes a dual-camera system to capture patient movements from two angles, then uses an AI model to interpret the data. It is a comprehensive solution, from recording to analysis.
+---
 
 ## Project Structure
 
-The project is a monorepo containing all necessary components.
+| Path | Description |
+|---|---|
+| `api/` | FastAPI backend — camera control, recording, processing pipeline |
+| `web/` | React/TypeScript frontend |
+| `models/` | YOLOv8 model files (`.pt`, `.engine`) |
+| `deploy/` | Jetson deployment scripts |
+| `docs/` | Sphinx documentation |
+| `requirements/` | Python dependency sets |
 
-*   **`api/`**: A Python backend using FastAPI that manages camera feeds, video processing, and the REST API.
-*   **`web/`**: A frontend built with React and TypeScript, providing the user interface.
-*   **`models/`**: Contains the AI models, including `yolov8n-pose.pt` for skeletal tracking.
-*   **`deploy/`**: Includes scripts for deploying the system on a Jetson device.
-*   **`docs/`**: Project documentation.
-*   **`requirements/`**: Python dependency lists.
+---
 
-## Local Setup
+## Setup
 
-Instructions for running the project on a local machine.
+### Backend
 
-### Backend (API)
-
-Requires Python 3.12 or higher.
+Requires Python 3.12+.
 
 ```sh
 cd api
 python -m venv venv
-# On Windows
-venv\Scripts\activate
-# On macOS/Linux
-source venv/bin/activate
+source venv/bin/activate       # Windows: venv\Scripts\activate
 pip install -r ../requirements/desktop.txt
 uvicorn main:app --reload
 ```
 
-### Frontend (Web)
+### Frontend
 
 ```sh
 cd web
@@ -46,36 +41,66 @@ npm install
 npm run dev
 ```
 
-After starting both services, open your browser to the address provided by the frontend's development server to view the application.
+Open the URL printed by Vite (typically `http://localhost:5173`).
 
-## Models & TensorRT
+---
 
-The system uses the `yolov8n-pose` model for skeletal tracking to track patient movements and derive clinical metrics.
+## Camera Modes
 
-For optimal performance, especially on edge devices like the NVIDIA Jetson, the models are optimized with **TensorRT**, a high-performance deep learning inference optimizer. This project uses TensorRT directly for model optimization instead of ONNX.
+Set via the `CAMERA_MODE` environment variable before starting the backend:
 
-To build the TensorRT engine from the `.pt` file, refer to the scripts and instructions in the `models/` directory.
+| Mode | Description |
+|---|---|
+| `auto` | Auto-detect connected RealSense cameras (default) |
+| `mock_bag` | Replay `.bag` files — no hardware needed |
+| `realsense` | Force live RealSense detection |
 
-## Edge Deployment
+For `mock_bag`, also set `BAG_FILE_CAM1` and `BAG_FILE_CAM2` to point at your `.bag` files.
 
-The project is designed for deployment on an NVIDIA Jetson device for real-time analysis in a clinical setting. The `deploy/` directory contains scripts to set up and package the artifacts for a Jetson device.
+For remote/Jetson deployment, set `REMOTE_MODE=true` and `API_HOST=0.0.0.0`.
+
+---
+
+## Models
+
+Processing uses `yolov8n-pose` (17 COCO keypoints). Place model files in `models/`.
+
+- The pipeline prefers a TensorRT `.engine` file and falls back to `.pt` if not found
+- Build the `.engine` on the target Jetson hardware — do not commit it, it's device-specific
+- On first run without any model file, Ultralytics will attempt to download `yolov8n-pose.pt`
+
+---
+
+## Recording Output
+
+Each session writes files named `<timestamp>_camera{1|2}.*` under `api/recordings/`:
+
+| File | Description |
+|---|---|
+| `_camera1.bag` / `_camera2.bag` | RealSense depth + RGB, used for processing |
+| `_camera1.mp4` / `_camera2.mp4` | RGB preview, used for tagging |
+| `_camera1_metadata.json` | Patient info sidecar (name, ID, timestamp) |
+
+Camera 1 = Front/Sagittale, Camera 2 = Side/Frontale.
+
+If only one camera is connected, only that camera's files are written (orphan mode). The camera swap button on the recording page remaps which physical device is treated as camera 1.
+
+---
 
 ## Documentation
 
-Comprehensive documentation for both the frontend and backend is available in the `docs/` directory. Building the documentation requires Sphinx.
-
-### Frontend (Web)
 ```sh
-cd web
-npm install
-npm run dev
+cd docs
+pip install -r requirements.txt
+make html
 ```
 
-## Documentation
-- See `docs/` for backend and frontend documentation.
-- See `models/README.md` for model management.
-- See `deploy/` for deployment scripts and Jetson artifact strategy.
+Output goes to `docs/_build/html/`. Swagger UI is at `http://localhost:8000/docs` while the backend is running.
+
+---
 
 ## Notes
-- Do NOT commit hardware-specific .engine files or large venvs.
-- Use sparse checkout for Jetson deployments to avoid downloading node_modules.
+
+- Do not commit `.engine` files or `venv/` directories
+- Use sparse checkout on Jetson to avoid pulling `node_modules`
+- If cameras are plugged in after the server starts, call `POST /cameras/refresh`

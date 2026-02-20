@@ -1,12 +1,10 @@
-Frontend: Overview & Development
-================================
+Frontend
+========
 
-Documentation for the React-based frontend application located in the ``web/`` directory.
+React/TypeScript application in ``web/``. Talks to the FastAPI backend over ``VITE_API_URL`` (default ``http://localhost:8000``).
 
-Development
------------
-
-To start the development server:
+Dev server
+----------
 
 .. code-block:: bash
 
@@ -14,10 +12,12 @@ To start the development server:
    npm install
    npm run dev
 
-To build for production:
+Production build
+----------------
 
 .. code-block:: bash
 
    cd web
    npm run build
 
+Output goes to ``web/dist/``.

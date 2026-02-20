@@ -113,7 +113,7 @@ export default function Processing() {
     try {
       const res = await fetch(`${API_URL}/recordings/batches`);
       const data = await res.json();
-      if (mountedRef.current) setBatches(data.batches);
+      if (mountedRef.current) setBatches(data.batches || []);
     } catch (err) {
       console.error('Failed to fetch batches:', err);
       if (mountedRef.current) setError('Failed to load recordings');

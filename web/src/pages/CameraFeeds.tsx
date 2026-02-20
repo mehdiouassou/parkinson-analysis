@@ -27,6 +27,12 @@ export default function CameraFeeds() {
   const [isSwapped, setIsSwapped] = useState(false);
   const [isSwapping, setIsSwapping] = useState(false);
 
+  // Camera connection status: 'connecting' | 'connected' | 'reconnecting' | 'disconnected'
+  const [camStatus, setCamStatus] = useState<Record<string, string>>({
+    cam0: 'connecting',
+    cam1: 'connecting',
+  });
+
   // Recording live metrics (populated by status polling)
   const [recordingDuration, setRecordingDuration] = useState<number | null>(null);
   const [frameCounts, setFrameCounts] = useState<Record<string, number>>({});
@@ -287,19 +293,23 @@ export default function CameraFeeds() {
   };
 
   const handleSwapCameras = async () => {
+    if (actionInFlight.current || isSwapping) return;
+    actionInFlight.current = true;
     setIsSwapping(true);
     try {
       const res = await fetch(`${API_URL}/cameras/swap`, { method: 'POST' });
       const data = await res.json();
+      if (!mountedRef.current) return;
       setIsSwapped(data.is_swapped);
       // Force-refresh both feed images so the swap is visible immediately
       setCameraKey(Date.now());
       showToast(data.is_swapped ? 'Cameras swapped' : 'Cameras restored to default', 'success');
     } catch (error) {
       console.error('Failed to swap cameras:', error);
-      showToast('Failed to swap cameras', 'error');
+      if (mountedRef.current) showToast('Failed to swap cameras', 'error');
     } finally {
-      setIsSwapping(false);
+      actionInFlight.current = false;
+      if (mountedRef.current) setIsSwapping(false);
     }
   };
 
@@ -442,7 +452,11 @@ export default function CameraFeeds() {
         <div className="bg-clinical-card dark:bg-clinical-dark-card border border-clinical-border dark:border-clinical-dark-border rounded overflow-hidden flex flex-col">
           <div className="px-2 py-1 border-b border-clinical-border dark:border-clinical-dark-border flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-1.5">
-              <span className={`w-2 h-2 rounded-full ${getCameraTypeLabel(0) === 'RealSense' ? 'bg-blue-500' : 'bg-clinical-ready'}`} />
+              <span className={`w-2 h-2 rounded-full ${
+                camStatus.cam0 === 'connected' ? 'bg-clinical-ready'
+                  : camStatus.cam0 === 'disconnected' ? 'bg-clinical-record'
+                  : 'bg-clinical-warning animate-pulse'
+              }`} />
               <span className="text-sm font-medium text-clinical-text-primary dark:text-clinical-text-dark">CAM1 — Front</span>
               {getCameraTypeLabel(0) && (
                 <span className={`text-xs px-1.5 py-0.5 rounded ${getCameraTypeLabel(0) === 'RealSense' ? 'bg-blue-500/20 text-blue-400' : 'bg-gray-500/20 text-gray-400'}`}>
@@ -457,26 +471,61 @@ export default function CameraFeeds() {
               key={`cam0-${cameraKey}`}
               src={`${API_URL}/camera/0?t=${cameraKey}`}
               alt="Camera 1 Feed"
-              className="w-full h-full object-contain"
-              onLoad={() => { camRetryCount.current['cam0'] = 0; }}
+              className={`w-full h-full object-contain ${camStatus.cam0 !== 'connected' ? 'opacity-30' : ''}`}
+              onLoad={() => {
+                camRetryCount.current['cam0'] = 0;
+                setCamStatus(prev => ({ ...prev, cam0: 'connected' }));
+              }}
               onError={(e) => {
                 const count = (camRetryCount.current['cam0'] || 0) + 1;
                 camRetryCount.current['cam0'] = count;
-                if (count > MAX_CAM_RETRIES) return; // stop retrying
+                if (count > MAX_CAM_RETRIES) {
+                  setCamStatus(prev => ({ ...prev, cam0: 'disconnected' }));
+                  return;
+                }
+                setCamStatus(prev => ({ ...prev, cam0: count === 1 ? 'connecting' : 'reconnecting' }));
                 const img = e.currentTarget;
-                // Exponential backoff: 1s, 2s, 4s... capped at 8s
                 const delay = Math.min(1000 * Math.pow(2, count - 1), 8000);
                 setTimeout(() => {
                   if (mountedRef.current) img.src = `${API_URL}/camera/0?t=${Date.now()}`;
                 }, delay);
               }}
             />
-            <div className="hidden absolute inset-0 flex flex-col items-center justify-center text-neutral-400">
-              <svg className="w-12 h-12 mb-2" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-              </svg>
-              <span className="text-sm font-medium">Signal Lost: Camera 1</span>
-            </div>
+            {camStatus.cam0 !== 'connected' && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-neutral-400">
+                {camStatus.cam0 === 'disconnected' ? (
+                  <>
+                    <svg className="w-12 h-12 mb-2 text-clinical-record" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                    </svg>
+                    <span className="text-sm font-medium text-clinical-record">Connection Lost: Camera 1</span>
+                    <button
+                      onClick={() => {
+                        camRetryCount.current['cam0'] = 0;
+                        setCamStatus(prev => ({ ...prev, cam0: 'connecting' }));
+                        setCameraKey(Date.now());
+                      }}
+                      className="mt-2 px-3 py-1 bg-clinical-blue text-white text-sm rounded hover:bg-clinical-blue-hover"
+                    >
+                      Retry Connection
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-8 h-8 mb-2 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                    </svg>
+                    <span className="text-sm font-medium">
+                      {camStatus.cam0 === 'reconnecting' ? 'Reconnecting...' : 'Connecting...'}
+                    </span>
+                    <span className="text-xs mt-1 text-neutral-500">
+                      Attempt {camRetryCount.current['cam0'] || 1} / {MAX_CAM_RETRIES}
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
             <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/70 rounded text-sm text-white font-mono">
               CAM1 | FRONT
             </div>
@@ -497,7 +546,11 @@ export default function CameraFeeds() {
         <div className="bg-clinical-card dark:bg-clinical-dark-card border border-clinical-border dark:border-clinical-dark-border rounded overflow-hidden flex flex-col">
           <div className="px-2 py-1 border-b border-clinical-border dark:border-clinical-dark-border flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-1.5">
-              <span className={`w-2 h-2 rounded-full ${getCameraTypeLabel(1) === 'RealSense' ? 'bg-blue-500' : 'bg-clinical-ready'}`} />
+              <span className={`w-2 h-2 rounded-full ${
+                camStatus.cam1 === 'connected' ? 'bg-clinical-ready'
+                  : camStatus.cam1 === 'disconnected' ? 'bg-clinical-record'
+                  : 'bg-clinical-warning animate-pulse'
+              }`} />
               <span className="text-sm font-medium text-clinical-text-primary dark:text-clinical-text-dark">CAM2 — Side</span>
               {getCameraTypeLabel(1) && (
                 <span className={`text-xs px-1.5 py-0.5 rounded ${getCameraTypeLabel(1) === 'RealSense' ? 'bg-blue-500/20 text-blue-400' : 'bg-gray-500/20 text-gray-400'}`}>
@@ -512,12 +565,19 @@ export default function CameraFeeds() {
               key={`cam1-${cameraKey}`}
               src={`${API_URL}/camera/1?t=${cameraKey}`}
               alt="Camera 2 Feed"
-              className="w-full h-full object-contain"
-              onLoad={() => { camRetryCount.current['cam1'] = 0; }}
+              className={`w-full h-full object-contain ${camStatus.cam1 !== 'connected' ? 'opacity-30' : ''}`}
+              onLoad={() => {
+                camRetryCount.current['cam1'] = 0;
+                setCamStatus(prev => ({ ...prev, cam1: 'connected' }));
+              }}
               onError={(e) => {
                 const count = (camRetryCount.current['cam1'] || 0) + 1;
                 camRetryCount.current['cam1'] = count;
-                if (count > MAX_CAM_RETRIES) return;
+                if (count > MAX_CAM_RETRIES) {
+                  setCamStatus(prev => ({ ...prev, cam1: 'disconnected' }));
+                  return;
+                }
+                setCamStatus(prev => ({ ...prev, cam1: count === 1 ? 'connecting' : 'reconnecting' }));
                 const img = e.currentTarget;
                 const delay = Math.min(1000 * Math.pow(2, count - 1), 8000);
                 setTimeout(() => {
@@ -525,12 +585,41 @@ export default function CameraFeeds() {
                 }, delay);
               }}
             />
-            <div className="hidden absolute inset-0 flex flex-col items-center justify-center text-neutral-400">
-              <svg className="w-12 h-12 mb-2" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-              </svg>
-              <span className="text-sm font-medium">Signal Lost: Camera 2</span>
-            </div>
+            {camStatus.cam1 !== 'connected' && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-neutral-400">
+                {camStatus.cam1 === 'disconnected' ? (
+                  <>
+                    <svg className="w-12 h-12 mb-2 text-clinical-record" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                    </svg>
+                    <span className="text-sm font-medium text-clinical-record">Connection Lost: Camera 2</span>
+                    <button
+                      onClick={() => {
+                        camRetryCount.current['cam1'] = 0;
+                        setCamStatus(prev => ({ ...prev, cam1: 'connecting' }));
+                        setCameraKey(Date.now());
+                      }}
+                      className="mt-2 px-3 py-1 bg-clinical-blue text-white text-sm rounded hover:bg-clinical-blue-hover"
+                    >
+                      Retry Connection
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-8 h-8 mb-2 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                    </svg>
+                    <span className="text-sm font-medium">
+                      {camStatus.cam1 === 'reconnecting' ? 'Reconnecting...' : 'Connecting...'}
+                    </span>
+                    <span className="text-xs mt-1 text-neutral-500">
+                      Attempt {camRetryCount.current['cam1'] || 1} / {MAX_CAM_RETRIES}
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
             <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/70 rounded text-sm text-white font-mono">
               CAM2 | SIDE
             </div>

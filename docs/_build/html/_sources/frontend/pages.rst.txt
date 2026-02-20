@@ -1,191 +1,151 @@
-Frontend: Pages (React)
-=======================
-
-This section provides a detailed API reference for the main page components of the application.
+Pages
+=====
 
 CameraFeeds
 -----------
 
 .. js:class:: CameraFeeds
 
-   The primary interface for clinical recording. Manages RealSense camera connections and recording lifecycle.
+   Recording interface. Manages RealSense camera connections and the recording lifecycle.
    Located in ``src/pages/CameraFeeds.tsx``.
 
    **State**
 
    .. js:attribute:: recordingState
 
-      :type: 'idle' | 'initializing' | 'warming_up' | 'recording' | 'paused' | 'stopping'
+      ``'idle' | 'initializing' | 'warming_up' | 'recording' | 'paused' | 'stopping'``
 
-      Current state of the recording process. Syncs with backend via ``/recording/status``.
+      Syncs with backend via ``GET /recording/status``.
 
    .. js:attribute:: camerasInfo
 
-      :type: CameraInfo[]
-
-      List of detected RealSense cameras fetched from ``/cameras/info``.
+      ``CameraInfo[]`` — Detected RealSense cameras, fetched from ``GET /cameras/info``.
 
    .. js:attribute:: patientId
 
-      :type: string
-
-      Input value for the patient's unique identifier.
+      ``string``
 
    .. js:attribute:: patientName
 
-      :type: string
-
-      Input value for the patient's name.
+      ``string``
 
    **Methods**
 
    .. js:function:: handleRecord()
 
-      *Async*
-
-      Initiates the recording process.
-      
-      1. Validates ``patientId`` and ``patientName``.
-      2. Sends POST request to ``/recording/start``.
-      3. Updates state to ``warming_up``.
+      *Async.* Validates ``patientId`` / ``patientName``, then calls ``POST /recording/start``.
+      State transitions to ``warming_up`` (3-second auto-exposure stabilisation) then ``recording``.
 
    .. js:function:: handleStop()
 
-      *Async*
-
-      Stops the current recording.
-      
-      1. Sends POST request to ``/recording/stop``.
-      2. Updates state to ``stopping`` then ``idle``.
+      *Async.* Calls ``POST /recording/stop``. State returns to ``idle``.
 
    .. js:function:: handleSwapCameras()
 
-      *Async*
-
-      Swaps the logical mapping of Camera 1 and Camera 2.
-      Useful if physical cameras are plugged into reversed ports.
+      *Async.* Calls ``POST /cameras/swap`` to flip the logical↔physical camera mapping.
+      Useful when physical cameras are plugged into reversed ports.
 
 Tagging
 -------
 
 .. js:class:: Tagging
 
-   Interactive video player and annotation tool.
+   Video player and annotation tool.
    Located in ``src/pages/Tagging.tsx``.
 
    **State**
 
    .. js:attribute:: videoFiles
 
-      :type: VideoFile[]
-
-      List of available recording files fetched from ``/recordings``.
+      ``VideoFile[]`` — MP4 recordings fetched from ``GET /recordings``.
 
    .. js:attribute:: actionLogs
 
-      :type: ActionLog[]
-
-      Array of tagged events (e.g., "Tremor Start") for the current session.
+      ``ActionLog[]`` — Tagged events for the current session (frame number + direction label).
 
    .. js:attribute:: playbackRate
 
-      :type: number
-
-      Current video playback speed (default: 1.0).
+      ``number`` — Current playback speed (default: ``1.0``).
 
    **Methods**
 
    .. js:function:: addActionLog(direction)
 
-      :param number direction: Direction ID (0=Left, 1=Right, etc.)
+      :param number direction: Direction ID (0 = Left, 1 = Right, etc.)
 
-      Adds a new timestamped log entry at the current video frame.
+      Appends a timestamped log entry at the current video frame.
 
    .. js:function:: copyToClipboard()
 
-      Formats ``actionLogs`` as CSV and copies to the system clipboard.
-      Format: ``frame,direction``.
+      Serialises ``actionLogs`` as ``frame,direction`` CSV and copies to clipboard.
 
    .. js:function:: detectCameraType(filename)
 
-      :param string filename: The video filename.
-      :returns: 'sagittale' | 'frontale' | null
+      :param string filename: Video filename.
+      :returns: ``'sagittale'`` | ``'frontale'`` | ``null``
 
-      Infers the camera view based on the filename suffix (``_camera1`` vs ``_camera2``).
+      Infers camera view from the filename suffix (``_camera1`` → sagittale, ``_camera2`` → frontale).
 
 Processing
 ----------
 
 .. js:class:: Processing
 
-   Dashboard for managing offline analysis jobs.
+   Dashboard for managing offline YOLOv8 analysis jobs.
    Located in ``src/pages/Processing.tsx``.
 
    **State**
 
    .. js:attribute:: batches
 
-      :type: Batch[]
-
-      List of recording sessions grouped by timestamp.
+      ``Batch[]`` — Recording sessions grouped by timestamp, fetched from ``GET /recordings/batches``.
 
    .. js:attribute:: currentJob
 
-      :type: ProcessingJob | null
-
-      Details of the currently running or most recent analysis job.
+      ``ProcessingJob | null`` — Active or most-recently-completed job.
 
    **Methods**
 
    .. js:function:: startProcessing()
 
-      *Async*
-
-      Triggers analysis for the selected batch.
-      Sends POST to ``/processing/start``.
+      *Async.* Sends ``POST /processing/start`` for the selected batch.
+      Both cameras are processed in parallel on the backend.
 
    .. js:function:: pollJobStatus(jobId)
 
-      *Async*
-
-      Periodically fetches job status from ``/processing/status/{jobId}``.
-      Updates progress bars and handles completion/error states.
+      *Async.* Polls ``GET /processing/status/{jobId}`` until the job reaches
+      ``completed``, ``error``, or ``cancelled``. Updates per-camera progress bars.
 
 FileManager
 -----------
 
 .. js:class:: FileManager
 
-   Utility for managing local files on the recording device.
+   File browser for recordings, tagging CSVs, and analysis JSONs.
    Located in ``src/pages/FileManager.tsx``.
 
    **State**
 
    .. js:attribute:: files
 
-      :type: AllFiles
-
-      Object containing lists of ``videos``, ``csvs``, and ``jsons``.
+      ``AllFiles`` — Lists of ``videos``, ``csvs``, and ``jsons`` from ``GET /files/all``.
 
    .. js:attribute:: downloadProgress
 
-      :type: Record<string, DownloadProgress>
-
-      Tracks download percentage and speed for active file transfers.
+      ``Record<string, DownloadProgress>`` — Per-file download percentage and transfer speed.
 
    **Methods**
 
    .. js:function:: downloadFile(type, filename)
 
-      *Async*
+      *Async.*
 
-      :param string type: File category ('video' | 'bag' | 'csv' | 'json')
-      :param string filename: Name of file to download
+      :param string type: ``'video'`` | ``'bag'`` | ``'csv'`` | ``'json'``
+      :param string filename: Target filename.
 
-      Initiates a file download. Uses streams for large files (like ``.bag``) to show progress.
+      Streams large files (e.g. ``.bag``) to show live progress; small files use a direct link.
 
    .. js:function:: handleDeleteVideoBatch(batchId)
 
-      *Async*
-
-      Permanently deletes a pair of recordings (Front + Side) and their metadata.
+      *Async.* Deletes both camera recordings (``BAG`` + ``MP4`` + metadata) for a batch via
+      ``DELETE /files/video/{batchId}``.

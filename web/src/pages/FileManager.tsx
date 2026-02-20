@@ -126,7 +126,11 @@ export default function FileManager() {
     try {
       const res = await fetch(`${API_URL}/files/all`);
       const data = await res.json();
-      if (mountedRef.current) setFiles(data);
+      if (mountedRef.current) setFiles({
+        videos: data.videos || [],
+        csvs: data.csvs || [],
+        jsons: data.jsons || [],
+      });
     } catch (error) {
       console.error('Failed to fetch files:', error);
     }
@@ -271,7 +275,7 @@ export default function FileManager() {
 
         // Only trigger browser download if still mounted
         if (mountedRef.current) {
-          const blob = new Blob(chunks);
+          const blob = new Blob(chunks as BlobPart[]);
           const downloadUrl = window.URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = downloadUrl;
@@ -398,8 +402,8 @@ export default function FileManager() {
   };
 
   // Syntax highlight JSON
-  const highlightJSON = (json: string): JSX.Element[] => {
-    const elements: JSX.Element[] = [];
+  const highlightJSON = (json: string): React.ReactNode[] => {
+    const elements: React.ReactNode[] = [];
     let key = 0;
     
     // Match different JSON tokens

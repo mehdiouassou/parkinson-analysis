@@ -1,7 +1,5 @@
-Frontend: Utilities & Config
-============================
-
-Configuration and helper functions.
+Utilities & Config
+==================
 
 Config
 ------
@@ -10,11 +8,7 @@ Config
 
 .. js:attribute:: API_URL
 
-   :type: string
-
-   The base URL for the backend API.
-   
-   * Defaults to ``http://localhost:8000`` if ``VITE_API_URL`` environment variable is not set.
+   ``string`` — Backend base URL. Reads ``VITE_API_URL`` at build time; falls back to ``http://localhost:8000``.
 
    .. code-block:: typescript
 
@@ -23,46 +17,42 @@ Config
 Types
 -----
 
-Common TypeScript interfaces used across the application.
-
 .. js:class:: CameraInfo
-
-   Represents a connected RealSense camera.
 
    .. js:attribute:: camera_id
 
-      :type: number
+      ``number``
 
    .. js:attribute:: type
 
-      :type: string
+      ``string``
 
    .. js:attribute:: serial
 
-      :type: string | null
+      ``string | null``
 
    .. js:attribute:: frame_size
 
-      :type: [number, number]
+      ``[number, number]``
 
    .. js:attribute:: fps
 
-      :type: number
+      ``number``
 
 .. js:class:: ProcessingJob
 
-   Represents a YOLOv8 analysis task.
-
    .. js:attribute:: job_id
 
-      :type: string
+      ``string``
 
    .. js:attribute:: status
 
-      :type: 'pending' | 'processing' | 'completed' | 'error' | 'cancelled'
+      ``'pending' | 'processing' | 'completed' | 'error' | 'cancelled'``
 
    .. js:attribute:: camera1_progress
 
-      :type: number
+      ``number`` — 0–100.
 
-      Progress percentage (0-100).
+   .. js:attribute:: camera2_progress
+
+      ``number`` — 0–100. ``-1`` if that camera was not part of the batch.

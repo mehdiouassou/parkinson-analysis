@@ -1,8 +1,8 @@
 """
-Parkinson Motion Analysis API
-=============================
+Parkinson Analysis API
+======================
 
-FastAPI backend for the Parkinson Dashboard clinical motion analysis system.
+FastAPI backend for the Parkinson Analysis dual-camera recording and processing pipeline.
 
 Modules:
     config.py      - Configuration, constants, and camera detection

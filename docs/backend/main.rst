@@ -1,7 +1,7 @@
 API: Main Application (FastAPI)
 ===============================
 
-The main entry point for the Parkinson Dashboard API. This handles routing and server orchestration.
+Main FastAPI application. Defines all routes for camera control, recording, processing, and file management.
 
 .. automodule:: main
    :members:

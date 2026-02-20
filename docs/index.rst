@@ -1,9 +1,19 @@
-Parkinson Analysis Documentation
-================================
+Parkinson Analysis
+==================
+
+FastAPI backend and React frontend for dual-camera Parkinson's motion analysis.
+Recordings are processed with YOLOv8-Pose; results are saved as JSON in ``api/processed/``.
+
+Interactive API docs (Swagger UI) are at ``http://localhost:8000/docs`` when the backend is running.
+
+.. note::
+   Install dependencies before building: ``pip install -r requirements/desktop.txt``
+
+----
 
 .. toctree::
    :maxdepth: 2
-   :caption: Backend API Reference
+   :caption: Backend
 
    backend/main
    backend/processing
@@ -14,33 +24,14 @@ Parkinson Analysis Documentation
 
 .. toctree::
    :maxdepth: 2
-   :caption: Frontend Documentation
+   :caption: Frontend
 
    frontend/index
    frontend/pages
    frontend/components
    frontend/utils
 
-API Endpoints (Swagger UI)
-==========================
-
-The backend provides interactive API documentation via Swagger UI.
-Once the server is running, you can access it at:
-
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
-
-Introduction
-============
-
-This documentation provides a comprehensive API reference for the **Parkinson Analysis** backend.
-The backend is built with **Python 3.12 (or lower)** and **FastAPI**, handling video processing using **YOLOv8** and camera inputs.
-
-.. note::
-   Ensure you have installed all dependencies from ``requirements/desktop.txt`` or ``requirements/jetson.txt`` before building docs.
-
-Indices and tables
-==================
+----
 
 * :ref:`genindex`
 * :ref:`modindex`

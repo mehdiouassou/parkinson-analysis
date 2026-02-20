@@ -170,7 +170,7 @@ export default function Tagging() {
     try {
       const res = await fetch(`${API_URL}/recordings`);
       const data = await res.json();
-      setVideoFiles(data.files);
+      setVideoFiles(data.files || []);
     } catch (error) {
       console.error('Failed to fetch recordings:', error);
     }
@@ -226,6 +226,8 @@ export default function Tagging() {
   };
 
   const handleFileSelect = async (filename: string) => {
+    if (!filename) return;
+
     // Warn if there are unsaved logs before switching
     if (actionLogs.length > 0) {
       const confirmed = window.confirm('You have unsaved tagging data. Switch video and discard?');

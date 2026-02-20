@@ -56,8 +56,12 @@ const MoonIcon = () => (
 
 export default function Layout() {
   const [darkMode, setDarkMode] = useState(() => {
-    const saved = localStorage.getItem('darkMode');
-    return saved ? JSON.parse(saved) : false;
+    try {
+      const saved = localStorage.getItem('darkMode');
+      return saved ? JSON.parse(saved) : false;
+    } catch {
+      return false;
+    }
   });
 
   useEffect(() => {
@@ -85,10 +89,10 @@ export default function Layout() {
               </div>
               <div className="hidden sm:block">
                 <h1 className="text-lg font-bold text-clinical-text-primary dark:text-clinical-text-dark leading-tight">
-                  Parkinson Dashboard
+                  Parkinson Analysis
                 </h1>
                 <p className="text-sm text-clinical-text-secondary dark:text-clinical-text-dark-secondary leading-tight">
-                  Clinical Motion Analysis
+                  Pose &amp; Tremor Analysis
                 </p>
               </div>
             </div>
@@ -134,7 +138,15 @@ export default function Layout() {
       <footer className="border-t border-clinical-border dark:border-clinical-dark-border flex-shrink-0">
         <div className="px-4 xl:px-6 py-2">
           <p className="text-center text-sm text-clinical-text-secondary dark:text-clinical-text-dark-secondary">
-            Parkinson Motion Analysis System v1.0 · For Clinical Research Use
+            Parkinson Analysis &middot;{' '}
+            <a
+              href="https://github.com/mehdiouassou"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-clinical-blue transition-colors"
+            >
+              Mehdi Ouassou
+            </a>
           </p>
         </div>
       </footer>
