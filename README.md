@@ -101,8 +101,7 @@ bash deploy/setup_jetson.sh
    ```sh
    source api/venv/bin/activate
    yolo export model=models/yolov8n-pose.pt format=engine device=0 half=True workspace=4
-   mv yolov8n-pose.engine api/
-   mv yolov8n-pose.pt api/
+   mv yolov8n-pose.engine models/
    rm -f yolov8n-pose.onnx
    ```
 
@@ -192,3 +191,18 @@ Output goes to `docs/_build/html/`. Swagger UI is at `http://localhost:8000/docs
 - Do not commit `.engine` files or `venv/` directories
 - Do not run `pip install` on Jetson — use the pre-built artifact
 - If cameras are plugged in after the server starts, call `POST /cameras/refresh`
+
+---
+
+## Author
+
+**Mehdi Ouassou**
+Università degli Studi di Verona — Informatica L-31
+
+---
+
+## License
+
+This project is licensed under the MIT License — see [LICENSE](LICENSE) for the full text.
+
+You are free to use, modify, and build upon this work for academic, research, or personal purposes. Attribution is required: any use or derivative work must credit **Mehdi Ouassou** as the original author.
