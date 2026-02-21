@@ -47,6 +47,7 @@ from config import (
     PROCESSED_DIR,
     FFMPEG_AVAILABLE,
     REALSENSE_AVAILABLE,
+    rs,
     imageio_ffmpeg,
     JPEG_QUALITY,
     DEFAULT_FPS,
@@ -983,28 +984,54 @@ def get_frame_comparison(batch_id: str):
             except Exception as e:
                 cam_result["mp4_frames_error"] = str(e)
 
-        # Count BAG frames by playing back (slow but accurate; skip if no RS)
-        # We use the sidecar mp4_frames as a reference instead since BAG has
-        # the same number of color frames as were captured by the pipeline.
-        # A fast approximation: BAG size / (avg bytes per frame).
-        # For now, estimate using fps × duration from mp4.
-        if bag_path.exists() and cam_result["mp4_frames"]:
-            # BAG and MP4 share the same capture pipeline, so BAG contains
-            # at least as many color frames as the MP4 (often more because
-            # MP4 can drop frames under CPU load, BAG records raw).
-            # We estimate BAG frames from file size heuristic.
+        # Count BAG frames by replaying through pyrealsense2 with real-time
+        # disabled so the pipeline runs as fast as disk I/O allows.
+        # This is exact (not an estimate) but takes a few seconds on large files.
+        if bag_path.exists():
             bag_size = bag_path.stat().st_size
             mp4_size = mp4_path.stat().st_size if mp4_path.exists() else 0
-            # Store sizes for reference
             cam_result["bag_size_mb"] = round(bag_size / (1024 * 1024), 1)
             cam_result["mp4_size_mb"] = round(mp4_size / (1024 * 1024), 1)
-            # BAG duration estimate from mp4 frame count and fps
-            fps = cam_result["fps"] or DEFAULT_FPS
-            mp4_frames = cam_result["mp4_frames"] or 0
-            estimated_duration_s = mp4_frames / fps if fps > 0 else 0
-            estimated_bag_frames = int(estimated_duration_s * fps)
-            cam_result["bag_frames"] = estimated_bag_frames
-            cam_result["bag_frames_note"] = "Estimated from MP4 duration (same pipeline)"
+
+            if REALSENSE_AVAILABLE and rs is not None:
+                try:
+                    _pipeline = rs.pipeline()
+                    _config = rs.config()
+                    rs.config.enable_device_from_file(
+                        _config, str(bag_path), repeat_playback=False
+                    )
+                    # Only need colour stream for counting
+                    _config.enable_stream(rs.stream.color)
+                    _profile = _pipeline.start(_config)
+
+                    # Run without real-time constraint — as fast as disk allows
+                    _playback = _profile.get_device().as_playback()
+                    _playback.set_real_time(False)
+
+                    bag_frame_count = 0
+                    while True:
+                        try:
+                            _frames = _pipeline.wait_for_frames(timeout_ms=2000)
+                            if _frames.get_color_frame():
+                                bag_frame_count += 1
+                        except RuntimeError:
+                            # End of file reached
+                            break
+
+                    try:
+                        _pipeline.stop()
+                    except Exception:
+                        pass
+
+                    cam_result["bag_frames"] = bag_frame_count
+                    cam_result["bag_frames_source"] = "exact"
+                except Exception as e:
+                    print(f"[FrameComparison] BAG playback failed for {bag_path.name}: {e}")
+                    cam_result["bag_frames"] = None
+                    cam_result["bag_frames_source"] = "unavailable"
+            else:
+                cam_result["bag_frames"] = None
+                cam_result["bag_frames_source"] = "realsense_unavailable"
 
         # Compute difference metrics
         mp4_f = cam_result["mp4_frames"]
@@ -1033,7 +1060,9 @@ def get_frame_comparison(batch_id: str):
     return {
         "batch_id": batch_id,
         "cameras": results,
-        "sync": sync_info,
+        # None (→ JSON null) when only one camera exists so the frontend
+        # can distinguish "no sync possible" from "sync computed".
+        "sync": sync_info if sync_info else None,
     }
 
 

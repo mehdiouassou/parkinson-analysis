@@ -61,6 +61,15 @@ export default {
         'md': '6px',
         'lg': '8px',
       },
+      keyframes: {
+        shimmer: {
+          '0%':   { transform: 'translateX(-150%)' },
+          '100%': { transform: 'translateX(500%)' },
+        },
+      },
+      animation: {
+        shimmer: 'shimmer 1.6s ease-in-out infinite',
+      },
     },
   },
   plugins: [],

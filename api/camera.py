@@ -13,6 +13,7 @@ Camera Priority:
 
 import numpy as np
 import threading
+import queue
 import os
 import time
 from typing import Dict, Tuple, Optional
@@ -72,11 +73,15 @@ class CameraSource:
         self._last_frame_time = 0
         self._stop_event = threading.Event()
 
-        # MP4 recording (decoupled from streaming)
+        # MP4 recording (producer-consumer queue decouples capture from disk I/O)
         self._mp4_writer = None
         self._mp4_paused = False
         self._mp4_lock = threading.Lock()
         self._mp4_frame_count = 0
+        # Queue between capture thread (producer) and writer thread (consumer).
+        # maxsize=120 ≈ 2 s at 60 fps / 4 s at 30 fps – smooths transient I/O spikes.
+        self._mp4_queue: queue.Queue = queue.Queue(maxsize=120)
+        self._mp4_writer_thread: Optional[threading.Thread] = None
 
         # Determine camera type based on mode and detection
         self.camera_type = get_camera_type(camera_id)
@@ -384,14 +389,20 @@ class CameraSource:
                     self._latest_depth = depth_data
                     self._last_frame_time = time.time()
 
-                # Write to MP4 if recording (decoupled from streaming)
+                # Enqueue frame for the dedicated MP4 writer thread (non-blocking).
+                # The capture loop must never block on disk I/O; the writer thread
+                # handles the slow FFmpeg stdin write independently.
                 with self._mp4_lock:
-                    if self._mp4_writer is not None and not self._mp4_paused:
-                        try:
-                            self._mp4_writer.write(frame_data)
-                            self._mp4_frame_count += 1
-                        except Exception:
-                            pass
+                    _should_enqueue = self._mp4_writer is not None and not self._mp4_paused
+                if _should_enqueue:
+                    try:
+                        # Copy because asanyarray() may return a view into the
+                        # RealSense frame buffer which is reused on the next frame.
+                        self._mp4_queue.put_nowait(frame_data.copy())
+                    except queue.Full:
+                        # Transient I/O spike: drop this frame rather than stalling
+                        # the capture loop and missing subsequent frames.
+                        pass
 
                 error_count = 0
 
@@ -460,18 +471,96 @@ class CameraSource:
 
 
     # -------------------------------------------------------------------------
-    #                        MP4 WRITER (DECOUPLED)
+    #                   MP4 WRITER (PRODUCER-CONSUMER)
     # -------------------------------------------------------------------------
 
+    def _mp4_writer_loop(self):
+        """
+        Dedicated consumer thread for MP4 frame writing.
+
+        Reads frames from ``_mp4_queue`` and writes them to the FFmpeg encoder.
+        The capture thread (producer) only does a non-blocking put_nowait() so
+        it is never delayed by disk I/O. A ``None`` sentinel in the queue signals
+        this thread to flush any remaining frames and then exit.
+        """
+        print(f"[Camera {self.camera_id}] MP4 writer thread started")
+        while True:
+            try:
+                frame = self._mp4_queue.get(timeout=0.5)
+            except queue.Empty:
+                # No frames yet; check again unless the writer was already cleared.
+                with self._mp4_lock:
+                    if self._mp4_writer is None:
+                        break
+                continue
+
+            if frame is None:
+                # Sentinel: drain has been signalled — exit cleanly.
+                break
+
+            # Write frame to FFmpeg stdin (may block briefly; that is fine here
+            # because this thread is dedicated and won't stall the capture loop).
+            with self._mp4_lock:
+                writer = self._mp4_writer
+                if writer is not None:
+                    try:
+                        writer.write(frame)
+                        self._mp4_frame_count += 1
+                    except Exception as e:
+                        print(f"[Camera {self.camera_id}] MP4 write error: {e}")
+
+        print(f"[Camera {self.camera_id}] MP4 writer thread stopped "
+              f"({self._mp4_frame_count} frames written)")
+
     def set_mp4_writer(self, writer):
-        """Attach an MP4 writer to the capture loop for decoupled recording."""
+        """
+        Attach an MP4 writer and start the dedicated writer thread.
+
+        Drains any leftover frames from a previous session before starting.
+        """
+        # Drain stale frames from any prior session.
+        while not self._mp4_queue.empty():
+            try:
+                self._mp4_queue.get_nowait()
+            except queue.Empty:
+                break
+
         with self._mp4_lock:
             self._mp4_writer = writer
             self._mp4_paused = False
             self._mp4_frame_count = 0
 
+        self._mp4_writer_thread = threading.Thread(
+            target=self._mp4_writer_loop,
+            name=f"mp4-writer-cam{self.camera_id}",
+            daemon=True,
+        )
+        self._mp4_writer_thread.start()
+
     def clear_mp4_writer(self) -> int:
-        """Detach MP4 writer and return total frames written."""
+        """
+        Signal the writer thread to stop, flush all buffered frames, and
+        return the total number of frames written to the MP4 file.
+
+        Blocks until the writer thread exits (up to 10 s) so the caller can
+        safely call ``writer.release()`` afterwards without losing frames.
+        """
+        # Put the sentinel.  If the queue is somehow full, evict one item to
+        # make room — we always want the sentinel to get through.
+        try:
+            self._mp4_queue.put(None, timeout=2.0)
+        except queue.Full:
+            try:
+                self._mp4_queue.get_nowait()
+            except queue.Empty:
+                pass
+            self._mp4_queue.put_nowait(None)
+
+        # Wait for the writer thread to process all remaining frames + sentinel.
+        if self._mp4_writer_thread and self._mp4_writer_thread.is_alive():
+            self._mp4_writer_thread.join(timeout=10.0)
+            self._mp4_writer_thread = None
+
         with self._mp4_lock:
             self._mp4_writer = None
             self._mp4_paused = False

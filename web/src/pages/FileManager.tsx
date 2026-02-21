@@ -40,6 +40,37 @@ interface FileInfo {
   modified: string;
 }
 
+interface CameraQuality {
+  bag_exists: boolean;
+  mp4_exists: boolean;
+  mp4_frames: number | null;
+  mp4_frames_from_sidecar: number | null;
+  bag_frames?: number | null;
+  bag_frames_source?: string;
+  frame_difference: number | null;
+  drop_rate_percent: number | null;
+  fps: number;
+  bag_size_mb?: number;
+  mp4_size_mb?: number;
+}
+
+interface QualitySync {
+  cam1_mp4_frames: number;
+  cam2_mp4_frames: number;
+  frame_count_difference: number;
+  time_offset_seconds: number;
+  in_sync: boolean;
+}
+
+interface QualityData {
+  batch_id: string;
+  cameras: {
+    camera1: CameraQuality;
+    camera2: CameraQuality;
+  };
+  sync: QualitySync | null;
+}
+
 interface AllFiles {
   videos: VideoBatch[];
   csvs: FileInfo[];
@@ -105,24 +136,46 @@ export default function FileManager() {
     }
   };
 
+  // Quality analysis modal state
+  const [qualityBatchId, setQualityBatchId] = useState<string | null>(null);
+  const [qualityData, setQualityData] = useState<QualityData | null>(null);
+  const [qualityLoading, setQualityLoading] = useState(false);
+  const [qualityElapsed, setQualityElapsed] = useState(0);
+
   // File viewer modal state
   const [viewingFile, setViewingFile] = useState<string | null>(null);
   const [viewContent, setViewContent] = useState<string | null>(null);
   const [viewType, setViewType] = useState<'csv' | 'json' | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
 
-  // Close modal on Escape key
+  // Close modals on Escape key
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && viewingFile) {
-        setViewingFile(null);
-        setViewContent(null);
-        setViewType(null);
+      if (e.key === 'Escape') {
+        if (qualityBatchId) {
+          setQualityBatchId(null);
+          setQualityData(null);
+        } else if (viewingFile) {
+          setViewingFile(null);
+          setViewContent(null);
+          setViewType(null);
+        }
       }
     };
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
-  }, [viewingFile]);
+  }, [viewingFile, qualityBatchId]);
+
+  // Tick elapsed time while quality analysis is running
+  useEffect(() => {
+    if (!qualityLoading) {
+      setQualityElapsed(0);
+      return;
+    }
+    setQualityElapsed(0);
+    const interval = setInterval(() => setQualityElapsed(s => s + 1), 1000);
+    return () => clearInterval(interval);
+  }, [qualityLoading]);
 
   const fetchFiles = async () => {
     setLoading(true);
@@ -374,6 +427,28 @@ export default function FileManager() {
     setViewType(null);
   };
 
+  const handleQualityCheck = async (batchId: string) => {
+    setQualityBatchId(batchId);
+    setQualityData(null);
+    setQualityLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/recordings/frame-comparison/${encodeURIComponent(batchId)}`);
+      if (!res.ok) throw new Error('Failed to load quality data');
+      const data: QualityData = await res.json();
+      if (mountedRef.current) setQualityData(data);
+    } catch (error) {
+      console.error('Quality check failed:', error);
+      showToast('Failed to load quality data', 'error');
+      if (mountedRef.current) setQualityBatchId(null);
+    }
+    if (mountedRef.current) setQualityLoading(false);
+  };
+
+  const closeQualityModal = () => {
+    setQualityBatchId(null);
+    setQualityData(null);
+  };
+
   // Parse CSV into rows and columns
   const parseCSV = (text: string): { headers: string[]; rows: string[][] } => {
     const lines = text.trim().split('\n');
@@ -541,6 +616,17 @@ export default function FileManager() {
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
+                        {/* Quality Analysis button */}
+                        <button
+                          onClick={() => handleQualityCheck(batch.batch_id)}
+                          className="px-3 py-1.5 bg-clinical-blue/10 text-clinical-blue text-sm rounded hover:bg-clinical-blue/20 transition-colors flex items-center gap-1.5"
+                          title="Analyse sync quality between cameras"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                          </svg>
+                          Quality
+                        </button>
                         {deleteConfirm === batch.batch_id ? (
                           <>
                             <span className="text-sm text-clinical-record mr-2">Delete both files?</span>
@@ -1006,6 +1092,212 @@ export default function FileManager() {
           </div>
         </div>
       </div>
+
+      {/* Quality Analysis Modal */}
+      {qualityBatchId && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={closeQualityModal}
+        >
+          <div
+            className="bg-clinical-card dark:bg-clinical-dark-card rounded-lg shadow-2xl w-full max-w-2xl flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-clinical-border dark:border-clinical-dark-border flex-shrink-0">
+              <div className="flex items-center gap-3">
+                <span className="px-2 py-1 text-xs font-semibold rounded bg-clinical-blue/10 text-clinical-blue">QUALITY</span>
+                <h2 className="text-lg font-semibold text-clinical-text-primary dark:text-clinical-text-dark truncate">{qualityBatchId}</h2>
+              </div>
+              <button
+                onClick={closeQualityModal}
+                className="p-2 text-clinical-text-secondary hover:text-clinical-text-primary dark:text-clinical-text-dark-secondary dark:hover:text-clinical-text-dark hover:bg-clinical-bg dark:hover:bg-clinical-dark-bg rounded transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 space-y-5">
+              {qualityLoading ? (() => {
+                const batch = files.videos.find(b => b.batch_id === qualityBatchId);
+                const fmtSize = (bytes: number) =>
+                  bytes >= 1073741824
+                    ? `${(bytes / 1073741824).toFixed(1)} GB`
+                    : `${(bytes / 1048576).toFixed(0)} MB`;
+                const bag1 = batch?.camera1_hq_size ? fmtSize(batch.camera1_hq_size) : null;
+                const bag2 = batch?.camera2_hq_size ? fmtSize(batch.camera2_hq_size) : null;
+                const sizeHint = bag1 && bag2 ? `${bag1} + ${bag2}` : bag1 ?? bag2 ?? null;
+                return (
+                  <div className="py-4 space-y-5">
+                    {/* Status text */}
+                    <div className="text-center space-y-1">
+                      <p className="text-sm font-medium text-clinical-text-primary dark:text-clinical-text-dark">
+                        Replaying BAG files — counting exact frames
+                      </p>
+                      <p className="text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary">
+                        {sizeHint ? `Analysing ${sizeHint} of depth data` : 'Reading depth recordings'}{'. Large files can take up to 90 s.'}
+                      </p>
+                    </div>
+
+                    {/* Indeterminate progress bar */}
+                    <div className="relative h-2 bg-clinical-border dark:bg-clinical-dark-border rounded-full overflow-hidden">
+                      <div className="absolute inset-y-0 w-1/3 bg-clinical-blue rounded-full animate-shimmer" />
+                    </div>
+
+                    {/* Elapsed time + phase hint */}
+                    <div className="flex items-center justify-between text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary">
+                      <span className="font-mono tabular-nums">{qualityElapsed}s elapsed</span>
+                      <span>
+                        {qualityElapsed < 10
+                          ? 'Opening pipeline…'
+                          : qualityElapsed < 40
+                          ? 'Counting frames…'
+                          : qualityElapsed < 70
+                          ? 'Almost there…'
+                          : 'Finalising…'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })() : qualityData ? (() => {
+                const { cameras, sync } = qualityData;
+
+                // Sync score helpers
+                const fps = cameras.camera1?.fps || cameras.camera2?.fps || 30;
+                const frameDiff = sync?.frame_count_difference ?? null;
+                const syncScore = (() => {
+                  if (frameDiff === null || !sync) return null;
+                  if (frameDiff === 0) return { label: 'Perfect', color: 'text-clinical-ready', bg: 'bg-clinical-ready/10 border-clinical-ready/30' };
+                  if (frameDiff <= fps * 0.5) return { label: 'Good', color: 'text-clinical-ready', bg: 'bg-clinical-ready/10 border-clinical-ready/30' };
+                  if (frameDiff <= fps * 2) return { label: 'Fair', color: 'text-clinical-warning', bg: 'bg-clinical-warning/10 border-clinical-warning/30' };
+                  return { label: 'Poor', color: 'text-clinical-record', bg: 'bg-clinical-record/10 border-clinical-record/30' };
+                })();
+
+                return (
+                  <>
+                    {/* Sync Score Banner */}
+                    {sync && syncScore && (
+                      <div className={`rounded-lg border p-4 ${syncScore.bg}`}>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-medium text-clinical-text-secondary dark:text-clinical-text-dark-secondary">Synchronisation Score</p>
+                            <p className={`text-2xl font-bold mt-0.5 ${syncScore.color}`}>{syncScore.label}</p>
+                          </div>
+                          <div className="text-right text-sm">
+                            <p className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">Frame Δ</p>
+                            <p className={`text-xl font-mono font-semibold ${syncScore.color}`}>{frameDiff}</p>
+                          </div>
+                          <div className="text-right text-sm">
+                            <p className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">Time offset</p>
+                            <p className={`text-xl font-mono font-semibold ${syncScore.color}`}>{sync.time_offset_seconds.toFixed(3)}s</p>
+                          </div>
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 gap-4 pt-3 border-t border-current/20">
+                          <div>
+                            <p className="text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary">CAM 1 MP4 frames</p>
+                            <p className="font-mono font-semibold text-clinical-text-primary dark:text-clinical-text-dark">{sync.cam1_mp4_frames.toLocaleString()}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary">CAM 2 MP4 frames</p>
+                            <p className="font-mono font-semibold text-clinical-text-primary dark:text-clinical-text-dark">{sync.cam2_mp4_frames.toLocaleString()}</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Per-Camera Stats */}
+                    <div className="grid grid-cols-2 gap-4">
+                      {(['camera1', 'camera2'] as const).map((camKey, i) => {
+                        const cam = cameras[camKey] as CameraQuality | undefined;
+                        if (!cam) return (
+                          <div key={camKey} className="bg-clinical-bg dark:bg-clinical-dark-bg rounded-lg p-4 border border-clinical-border dark:border-clinical-dark-border">
+                            <p className="text-sm font-semibold text-clinical-text-secondary dark:text-clinical-text-dark-secondary mb-2">Camera {i + 1}</p>
+                            <p className="text-sm text-clinical-record">No data</p>
+                          </div>
+                        );
+                        const dropOk = (cam.drop_rate_percent ?? 0) <= 1;
+                        const dropFair = (cam.drop_rate_percent ?? 0) <= 5;
+                        const dropColor = dropOk ? 'text-clinical-ready' : dropFair ? 'text-clinical-warning' : 'text-clinical-record';
+                        return (
+                          <div key={camKey} className="bg-clinical-bg dark:bg-clinical-dark-bg rounded-lg p-4 border border-clinical-border dark:border-clinical-dark-border space-y-2">
+                            <p className="text-sm font-semibold text-clinical-text-primary dark:text-clinical-text-dark">Camera {i + 1}</p>
+                            <div className="space-y-1.5 text-sm">
+                              <div className="flex justify-between">
+                                <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">MP4 frames</span>
+                                <span className="font-mono font-semibold text-clinical-text-primary dark:text-clinical-text-dark">{cam.mp4_frames?.toLocaleString() ?? '—'}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary" title="Exact frame count replayed from the BAG file">BAG frames</span>
+                                <span className="font-mono font-semibold text-clinical-text-primary dark:text-clinical-text-dark">
+                                  {cam.bag_frames != null
+                                    ? <>
+                                        {cam.bag_frames.toLocaleString()}
+                                        {cam.mp4_frames != null && cam.bag_frames !== cam.mp4_frames && (
+                                          <span className="text-xs ml-1 text-clinical-text-secondary dark:text-clinical-text-dark-secondary opacity-70">
+                                            (Δ{Math.abs(cam.bag_frames - cam.mp4_frames)})
+                                          </span>
+                                        )}
+                                      </>
+                                    : <span className="opacity-50">{cam.bag_frames_source === 'realsense_unavailable' ? 'no RS' : '—'}</span>
+                                  }
+                                </span>
+                              </div>
+                              {cam.mp4_frames_from_sidecar != null && (
+                                <div className="flex justify-between">
+                                  <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary" title="Frames counter saved by the backend at recording stop — cross-check against the MP4 container">Frames at stop</span>
+                                  <span className={`font-mono text-sm ${cam.mp4_frames_from_sidecar === cam.mp4_frames ? 'text-clinical-ready' : 'text-clinical-warning'}`}>
+                                    {cam.mp4_frames_from_sidecar.toLocaleString()}
+                                    {cam.mp4_frames != null && cam.mp4_frames_from_sidecar !== cam.mp4_frames && (
+                                      <span className="text-xs ml-1 opacity-70">(Δ{Math.abs(cam.mp4_frames_from_sidecar - cam.mp4_frames)})</span>
+                                    )}
+                                  </span>
+                                </div>
+                              )}
+                              <div className="flex justify-between">
+                                <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">Frame drops</span>
+                                <span className={`font-mono font-semibold ${dropColor}`}>{cam.frame_difference ?? '—'}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">Drop rate</span>
+                                <span className={`font-mono font-semibold ${dropColor}`}>{cam.drop_rate_percent != null ? `${cam.drop_rate_percent}%` : '—'}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">FPS</span>
+                                <span className="font-mono text-clinical-text-secondary dark:text-clinical-text-dark-secondary">{cam.fps}</span>
+                              </div>
+                              {cam.bag_size_mb != null && (
+                                <div className="flex justify-between">
+                                  <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">BAG / MP4</span>
+                                  <span className="font-mono text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary">{cam.bag_size_mb} MB / {cam.mp4_size_mb} MB</span>
+                                </div>
+                              )}
+                              <div className="flex gap-2 pt-1">
+                                <span className={`text-xs px-1.5 py-0.5 rounded ${cam.bag_exists ? 'bg-clinical-ready/10 text-clinical-ready' : 'bg-clinical-record/10 text-clinical-record'}`}>BAG {cam.bag_exists ? '✓' : '✗'}</span>
+                                <span className={`text-xs px-1.5 py-0.5 rounded ${cam.mp4_exists ? 'bg-clinical-ready/10 text-clinical-ready' : 'bg-clinical-record/10 text-clinical-record'}`}>MP4 {cam.mp4_exists ? '✓' : '✗'}</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {!sync && (
+                      <p className="text-sm text-clinical-text-secondary dark:text-clinical-text-dark-secondary text-center py-2">
+                        Sync data unavailable (need both cameras to compare).
+                      </p>
+                    )}
+                  </>
+                );
+              })() : (
+                <p className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary text-center py-8">No quality data available</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* File Viewer Modal */}
       {viewingFile && (

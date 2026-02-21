@@ -224,6 +224,8 @@ export default function CameraFeeds() {
 
   // api call handlers - track in-flight to prevent double-clicks
   const actionInFlight = useRef(false);
+  // Separate ref for refresh so it never blocks record/pause/stop and vice-versa
+  const refreshInFlight = useRef(false);
 
   const handleRecord = async () => {
     if (!patientName.trim() || !patientId.trim()) {
@@ -339,35 +341,47 @@ export default function CameraFeeds() {
   };
 
   const handleRefresh = async () => {
-    if (actionInFlight.current) return;
-    actionInFlight.current = true;
+    // Refresh runs independently — doesn't block record/pause/stop/swap and
+    // those actions don't block refresh.  Only one refresh at a time is allowed.
+    if (refreshInFlight.current) return;
+    // Refuse to refresh while a recording is active (cameras would be stopped).
+    if (recordingState !== 'idle') {
+      showToast('Cannot refresh cameras while recording', 'error');
+      return;
+    }
+    refreshInFlight.current = true;
     setIsRefreshing(true);
-    
+
     try {
-      showToast('Refreshing camera list...', 'info');
-      // Simple synchronous call
-      const res = await fetch(`${API_URL}/cameras/refresh`, { method: 'POST' });
-      if (!res.ok) throw new Error('Refresh failed');
-      
-      const data = await res.json();
-      
+      showToast('Refreshing cameras…', 'info');
+
+      // Step 1: tell backend to shut down cameras and re-detect.
+      const refreshRes = await fetch(`${API_URL}/cameras/refresh`, { method: 'POST' });
+      if (!refreshRes.ok) throw new Error('Refresh failed');
+
+      // Step 2: re-fetch /cameras/info — this also triggers background camera
+      // restart on the backend (get_camera_source() is called per camera).
+      const infoRes = await fetch(`${API_URL}/cameras/info`);
+      if (!infoRes.ok) throw new Error('Failed to get camera info after refresh');
+      const infoData = await infoRes.json();
+
       if (mountedRef.current) {
-         // Convert dict {0: {...}, 1: {...}} to array
-         // Note: backend returns { "0": {...}, "1": {...} }
-         const cameras = Object.entries(data.detected || {}).map(([id, info]: any) => ({
-             ...info,
-             camera_id: parseInt(id)
-         }));
-         setCamerasInfo(cameras);
-         showToast(`Scan complete. Found ${cameras.length} cameras.`, 'success');
-         setCameraKey(Date.now());
+        setCamerasInfo(infoData.cameras || []);
+        const found = (infoData.cameras || []).length;
+        showToast(`Found ${found} camera${found !== 1 ? 's' : ''}`, found > 0 ? 'success' : 'info');
+
+        // Reset retry counters so the feeds reconnect from scratch instead of
+        // staying in the "disconnected" state from the shutdown above.
+        camRetryCount.current = { cam0: 0, cam1: 0 };
+        setCamStatus({ cam0: 'connecting', cam1: 'connecting' });
+        setCameraKey(Date.now());
       }
     } catch (error) {
       console.error('Failed to refresh cameras:', error);
-      showToast('Failed to refresh cameras', 'error');
+      if (mountedRef.current) showToast('Failed to refresh cameras', 'error');
     } finally {
       if (mountedRef.current) setIsRefreshing(false);
-      actionInFlight.current = false;
+      refreshInFlight.current = false;
     }
   };
 
@@ -505,8 +519,8 @@ export default function CameraFeeds() {
             <img
               key={`cam0-${cameraKey}`}
               src={`${API_URL}/camera/0?t=${cameraKey}`}
-              alt="Camera 1 Feed"
-              className={`w-full h-full object-contain ${camStatus.cam0 !== 'connected' ? 'opacity-30' : ''}`}
+              alt=""
+              className={`w-full h-full object-contain ${camStatus.cam0 !== 'connected' ? 'opacity-0' : ''}`}
               onLoad={() => {
                 camRetryCount.current['cam0'] = 0;
                 setCamStatus(prev => ({ ...prev, cam0: 'connected' }));
@@ -599,8 +613,8 @@ export default function CameraFeeds() {
             <img
               key={`cam1-${cameraKey}`}
               src={`${API_URL}/camera/1?t=${cameraKey}`}
-              alt="Camera 2 Feed"
-              className={`w-full h-full object-contain ${camStatus.cam1 !== 'connected' ? 'opacity-30' : ''}`}
+              alt=""
+              className={`w-full h-full object-contain ${camStatus.cam1 !== 'connected' ? 'opacity-0' : ''}`}
               onLoad={() => {
                 camRetryCount.current['cam1'] = 0;
                 setCamStatus(prev => ({ ...prev, cam1: 'connected' }));
@@ -773,6 +787,31 @@ export default function CameraFeeds() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" />
             </svg>
             {isSwapped ? 'Cameras Swapped' : 'Swap Cameras'}
+          </button>
+
+          {/* Refresh Cameras button — independent of actionInFlight */}
+          <button
+            onClick={handleRefresh}
+            disabled={isRefreshing || recordingState !== 'idle'}
+            title="Re-detect cameras (use after plugging/unplugging)"
+            className="flex items-center px-4 py-2 rounded text-sm font-semibold transition-colors border bg-clinical-bg dark:bg-clinical-dark-bg border-clinical-border dark:border-clinical-dark-border text-clinical-text-secondary dark:text-clinical-text-dark-secondary hover:bg-clinical-border dark:hover:bg-clinical-dark-border disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isRefreshing ? (
+              <>
+                <svg className="w-4 h-4 mr-1.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+                Refreshing…
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Refresh
+              </>
+            )}
           </button>
 
           <span className="text-sm text-clinical-text-secondary dark:text-clinical-text-dark-secondary ml-4">
