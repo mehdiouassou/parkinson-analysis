@@ -1,20 +1,19 @@
 # docs/
 
-Sphinx documentation for the Parkinson Analysis project.
+Sphinx documentation for the Parkinson Analysis project. Covers the full architecture: recording pipeline, multi camera sync, conversion, processing, streaming and the frontend.
 
 ## Build
 
 ```sh
 pip install -r requirements.txt
-make html         # Linux/macOS
-.\make.bat html   # Windows
+sphinx-build -b html . _build/html
 ```
 
 Output goes to `_build/html/index.html`.
 
 ## Structure
 
-- `backend/` — auto-generated API reference from Python docstrings (`sphinx.ext.autodoc`)
-- `frontend/` — manually written reference for React pages, components, and utilities
-- `conf.py` — Sphinx configuration (theme: furo)
-- `index.rst` — documentation root
+- `index.rst` — root page with architecture overview, sync explanation and limitations
+- `backend/` — per module docs with how it works sections + autodoc API reference
+- `frontend/` — manually written docs for React pages, components and utilities
+- `conf.py` — Sphinx config (furo theme, autodoc with mocked heavy deps)

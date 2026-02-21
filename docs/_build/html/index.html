@@ -3,7 +3,7 @@
   <head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="index" title="Index" href="genindex.html"><link rel="search" title="Search" href="search.html"><link rel="next" title="API: Main Application (FastAPI)" href="backend/main.html">
+<link rel="index" title="Index" href="genindex.html"><link rel="search" title="Search" href="search.html"><link rel="next" title="Main Application (FastAPI)" href="backend/main.html">
 
     <!-- Generated with Sphinx 8.1.3 and Furo 2025.12.19 -->
         <title>Parkinson Analysis 1.0.0 documentation</title>
@@ -172,7 +172,7 @@
           <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
         </button>
       </div>
-      <label class="toc-overlay-icon toc-header-icon no-toc" for="__toc">
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
         <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
       </label>
     </div>
@@ -192,12 +192,13 @@
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
   <p class="caption" role="heading"><span class="caption-text">Backend</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="backend/main.html">API: Main Application (FastAPI)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="backend/processing.html">API: Processing (YOLOv8 &amp; Motion)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="backend/camera.html">API: Camera Interface (RealSense/Bag)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="backend/config.html">API: Configuration</a></li>
-<li class="toctree-l1"><a class="reference internal" href="backend/models.html">API: Data Models (Pydantic)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="backend/writers.html">API: Writers (Video &amp; Data)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backend/main.html">Main Application (FastAPI)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backend/camera.html">Camera Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backend/config.html">Configuration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backend/conversion.html">Conversion Pipeline</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backend/processing.html">Processing Pipeline (YOLOv8)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backend/models.html">Data Models (Pydantic)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backend/writers.html">Writers</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">Frontend</span></p>
 <ul>
@@ -238,109 +239,91 @@
               <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
             </button>
           </div>
-          <label class="toc-overlay-icon toc-content-icon no-toc" for="__toc">
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
             <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
           </label>
         </div>
         <article role="main" id="furo-main-content">
           <section id="parkinson-analysis">
 <h1>Parkinson Analysis<a class="headerlink" href="#parkinson-analysis" title="Link to this heading">¶</a></h1>
-<p>FastAPI backend and React frontend for dual-camera Parkinson’s motion analysis.
-Recordings are processed with YOLOv8-Pose; results are saved as JSON in <code class="docutils literal notranslate"><span class="pre">api/processed/</span></code>.</p>
+<p>Dual camera motion analysis tool for Parkinson’s assessment. Records synchronized video from
+two Intel RealSense D455 cameras on an NVIDIA Jetson AGX Orin, converts recordings to MP4,
+and runs YOLOv8-Pose for skeletal keypoint extraction.</p>
 <p>Interactive API docs (Swagger UI) are at <code class="docutils literal notranslate"><span class="pre">http://localhost:8000/docs</span></code> when the backend is running.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>Install dependencies before building: <code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">-r</span> <span class="pre">requirements/desktop.txt</span></code></p>
+<p>Install dependencies before building docs: <code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">-r</span> <span class="pre">docs/requirements.txt</span></code></p>
 </div>
+<section id="how-it-all-fits-together">
+<h2>How it all fits together<a class="headerlink" href="#how-it-all-fits-together" title="Link to this heading">¶</a></h2>
+<p>The system is split into a FastAPI backend (<code class="docutils literal notranslate"><span class="pre">api/</span></code>) and a React frontend (<code class="docutils literal notranslate"><span class="pre">web/</span></code>).
+The backend handles everything hardware related: camera detection, BAG recording, conversion,
+processing. The frontend is just a dashboard that talks to the backend over REST.</p>
+<p><strong>Recording flow</strong>: user clicks record, 3 second warmup, both cameras start BAG recording in
+parallel threads, MJPEG preview throttled to 15fps during recording, user clicks stop, metadata
+sidecars written.</p>
+<p><strong>Conversion flow</strong>: BAG files replayed at max speed, frames piped to FFmpeg, tries NVENC first
+then falls back to x264, frame count validated, temp file renamed to .mp4 on success.</p>
+<p><strong>Processing flow</strong>: YOLOv8 pose inference on each frame, keypoints extracted, motion vectors
+calculated, tremor detected, JSON report saved.</p>
+<section id="multi-camera-sync-no-sync-cable">
+<h3>Multi camera sync (no sync cable)<a class="headerlink" href="#multi-camera-sync-no-sync-cable" title="Link to this heading">¶</a></h3>
+<p>Both cameras start in parallel threads and we capture <code class="docutils literal notranslate"><span class="pre">time.monotonic()</span></code> timestamps around the
+pipeline restart to measure the actual inter camera start offset. This gets stored in the metadata
+sidecar and shown in the quality analysis page. Typical offset is under 500ms.</p>
+<p>The pause/resume system uses the RealSense SDK recorder device <code class="docutils literal notranslate"><span class="pre">pause()</span></code>/<code class="docutils literal notranslate"><span class="pre">resume()</span></code> for real
+BAG pausing (no dead frames written during pause).</p>
+<p>Streaming is throttled to 30fps idle, 15fps during recording to save CPU and USB bandwidth.</p>
+</section>
+<section id="known-limitations">
+<h3>Known limitations<a class="headerlink" href="#known-limitations" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>No hardware sync cable means no frame level synchronization between cameras</p></li>
+<li><p>USB bandwidth is tight with two D455 cameras at 60fps (falls back to 30 if needed)</p></li>
+<li><p>Pipeline restart on record start/stop causes brief MJPEG interruption</p></li>
+<li><p>BAG files are large (several GB per minute at 60fps with depth)</p></li>
+<li><p>Conversion is post recording by design (no FFmpeg during capture)</p></li>
+</ul>
 <hr class="docutils" />
 <div class="toctree-wrapper compound">
 <p class="caption" role="heading"><span class="caption-text">Backend</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="backend/main.html">API: Main Application (FastAPI)</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#parkinson-analysis-api">Parkinson Analysis API</a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.cancel_processing"><code class="docutils literal notranslate"><span class="pre">cancel_processing()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.delete_csv"><code class="docutils literal notranslate"><span class="pre">delete_csv()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.delete_json"><code class="docutils literal notranslate"><span class="pre">delete_json()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.delete_single_video"><code class="docutils literal notranslate"><span class="pre">delete_single_video()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.delete_video_batch"><code class="docutils literal notranslate"><span class="pre">delete_video_batch()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.download_bag"><code class="docutils literal notranslate"><span class="pre">download_bag()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.download_csv"><code class="docutils literal notranslate"><span class="pre">download_csv()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.download_json"><code class="docutils literal notranslate"><span class="pre">download_json()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.download_video"><code class="docutils literal notranslate"><span class="pre">download_video()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.fix_mp4_codec"><code class="docutils literal notranslate"><span class="pre">fix_mp4_codec()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.gen_frames"><code class="docutils literal notranslate"><span class="pre">gen_frames()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.get_cameras_info"><code class="docutils literal notranslate"><span class="pre">get_cameras_info()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.get_cameras_swap_state"><code class="docutils literal notranslate"><span class="pre">get_cameras_swap_state()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.get_frame_comparison"><code class="docutils literal notranslate"><span class="pre">get_frame_comparison()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.get_physical_camera_id"><code class="docutils literal notranslate"><span class="pre">get_physical_camera_id()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.get_processing_status"><code class="docutils literal notranslate"><span class="pre">get_processing_status()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.get_recording_status"><code class="docutils literal notranslate"><span class="pre">get_recording_status()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.get_system_info"><code class="docutils literal notranslate"><span class="pre">get_system_info()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.get_video"><code class="docutils literal notranslate"><span class="pre">get_video()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.get_video_metadata"><code class="docutils literal notranslate"><span class="pre">get_video_metadata()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.health"><code class="docutils literal notranslate"><span class="pre">health()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.list_all_files"><code class="docutils literal notranslate"><span class="pre">list_all_files()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.list_batches"><code class="docutils literal notranslate"><span class="pre">list_batches()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.list_processing_jobs"><code class="docutils literal notranslate"><span class="pre">list_processing_jobs()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.list_recordings"><code class="docutils literal notranslate"><span class="pre">list_recordings()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.pause_recording"><code class="docutils literal notranslate"><span class="pre">pause_recording()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.refresh_cameras"><code class="docutils literal notranslate"><span class="pre">refresh_cameras()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.resume_recording"><code class="docutils literal notranslate"><span class="pre">resume_recording()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.save_tagging"><code class="docutils literal notranslate"><span class="pre">save_tagging()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.shutdown"><code class="docutils literal notranslate"><span class="pre">shutdown()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.start_processing"><code class="docutils literal notranslate"><span class="pre">start_processing()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.start_recording"><code class="docutils literal notranslate"><span class="pre">start_recording()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.stop_recording"><code class="docutils literal notranslate"><span class="pre">stop_recording()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.swap_cameras"><code class="docutils literal notranslate"><span class="pre">swap_cameras()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.video_feed"><code class="docutils literal notranslate"><span class="pre">video_feed()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/main.html#main.view_json"><code class="docutils literal notranslate"><span class="pre">view_json()</span></code></a></li>
+<li class="toctree-l1"><a class="reference internal" href="backend/main.html">Main Application (FastAPI)</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="backend/main.html#key-concepts">Key concepts</a></li>
+<li class="toctree-l2"><a class="reference internal" href="backend/main.html#routes-overview">Routes overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="backend/main.html#module-main">API reference</a></li>
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="backend/processing.html">API: Processing (YOLOv8 &amp; Motion)</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="backend/processing.html#processing.ANALYSIS_CONFIG"><code class="docutils literal notranslate"><span class="pre">ANALYSIS_CONFIG</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/processing.html#processing.BagFileReader"><code class="docutils literal notranslate"><span class="pre">BagFileReader</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/processing.html#processing.analyze_tremor_yolo"><code class="docutils literal notranslate"><span class="pre">analyze_tremor_yolo()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/processing.html#processing.calculate_keypoint_motion"><code class="docutils literal notranslate"><span class="pre">calculate_keypoint_motion()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/processing.html#processing.cancel_job"><code class="docutils literal notranslate"><span class="pre">cancel_job()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/processing.html#processing.check_job_cancelled"><code class="docutils literal notranslate"><span class="pre">check_job_cancelled()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/processing.html#processing.create_processing_job"><code class="docutils literal notranslate"><span class="pre">create_processing_job()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/processing.html#processing.extract_yolo_landmarks"><code class="docutils literal notranslate"><span class="pre">extract_yolo_landmarks()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/processing.html#processing.get_all_jobs"><code class="docutils literal notranslate"><span class="pre">get_all_jobs()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/processing.html#processing.get_job"><code class="docutils literal notranslate"><span class="pre">get_job()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/processing.html#processing.is_batch_processing"><code class="docutils literal notranslate"><span class="pre">is_batch_processing()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/processing.html#processing.process_video"><code class="docutils literal notranslate"><span class="pre">process_video()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/processing.html#processing.update_job_progress"><code class="docutils literal notranslate"><span class="pre">update_job_progress()</span></code></a></li>
+<li class="toctree-l1"><a class="reference internal" href="backend/camera.html">Camera Interface</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="backend/camera.html#how-it-works">How it works</a></li>
+<li class="toctree-l2"><a class="reference internal" href="backend/camera.html#global-management">Global management</a></li>
+<li class="toctree-l2"><a class="reference internal" href="backend/camera.html#module-camera">API reference</a></li>
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="backend/camera.html">API: Camera Interface (RealSense/Bag)</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="backend/camera.html#camera.CameraSource"><code class="docutils literal notranslate"><span class="pre">CameraSource</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/camera.html#camera.get_camera_source"><code class="docutils literal notranslate"><span class="pre">get_camera_source()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/camera.html#camera.shutdown_all_cameras"><code class="docutils literal notranslate"><span class="pre">shutdown_all_cameras()</span></code></a></li>
+<li class="toctree-l1"><a class="reference internal" href="backend/config.html">Configuration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="backend/config.html#environment-variables">Environment variables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="backend/config.html#video-settings">Video settings</a></li>
+<li class="toctree-l2"><a class="reference internal" href="backend/config.html#device-detection">Device detection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="backend/config.html#module-config">API reference</a></li>
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="backend/config.html">API: Configuration</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="backend/config.html#config.detect_realsense_devices"><code class="docutils literal notranslate"><span class="pre">detect_realsense_devices()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/config.html#config.get_camera_type"><code class="docutils literal notranslate"><span class="pre">get_camera_type()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/config.html#config.get_detected_cameras"><code class="docutils literal notranslate"><span class="pre">get_detected_cameras()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/config.html#config.get_realsense_count"><code class="docutils literal notranslate"><span class="pre">get_realsense_count()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/config.html#config.refresh_camera_detection"><code class="docutils literal notranslate"><span class="pre">refresh_camera_detection()</span></code></a></li>
+<li class="toctree-l1"><a class="reference internal" href="backend/conversion.html">Conversion Pipeline</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="backend/conversion.html#how-it-works">How it works</a></li>
+<li class="toctree-l2"><a class="reference internal" href="backend/conversion.html#safety">Safety</a></li>
+<li class="toctree-l2"><a class="reference internal" href="backend/conversion.html#module-conversion">API reference</a></li>
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="backend/models.html">API: Data Models (Pydantic)</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="backend/models.html#models.ActionLog"><code class="docutils literal notranslate"><span class="pre">ActionLog</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/models.html#models.ProcessRequest"><code class="docutils literal notranslate"><span class="pre">ProcessRequest</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/models.html#models.RecordingStartRequest"><code class="docutils literal notranslate"><span class="pre">RecordingStartRequest</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/models.html#models.SaveTaggingRequest"><code class="docutils literal notranslate"><span class="pre">SaveTaggingRequest</span></code></a></li>
+<li class="toctree-l1"><a class="reference internal" href="backend/processing.html">Processing Pipeline (YOLOv8)</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="backend/processing.html#what-it-does">What it does</a></li>
+<li class="toctree-l2"><a class="reference internal" href="backend/processing.html#module-processing">API reference</a></li>
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="backend/writers.html">API: Writers (Video &amp; Data)</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="backend/writers.html#writers.BagWriter"><code class="docutils literal notranslate"><span class="pre">BagWriter</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/writers.html#writers.FFmpegWriter"><code class="docutils literal notranslate"><span class="pre">FFmpegWriter</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/writers.html#writers.create_bag_writer"><code class="docutils literal notranslate"><span class="pre">create_bag_writer()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/writers.html#writers.create_high_quality_writer"><code class="docutils literal notranslate"><span class="pre">create_high_quality_writer()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/writers.html#writers.create_mp4_writer"><code class="docutils literal notranslate"><span class="pre">create_mp4_writer()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/writers.html#writers.start_realsense_recording"><code class="docutils literal notranslate"><span class="pre">start_realsense_recording()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="backend/writers.html#writers.stop_realsense_recording"><code class="docutils literal notranslate"><span class="pre">stop_realsense_recording()</span></code></a></li>
+<li class="toctree-l1"><a class="reference internal" href="backend/models.html">Data Models (Pydantic)</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="backend/models.html#module-models">API reference</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="backend/writers.html">Writers</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="backend/writers.html#module-writers">API reference</a></li>
 </ul>
 </li>
 </ul>
@@ -351,11 +334,13 @@ Recordings are processed with YOLOv8-Pose; results are saved as JSON in <code cl
 <li class="toctree-l1"><a class="reference internal" href="frontend/index.html">Frontend</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="frontend/index.html#dev-server">Dev server</a></li>
 <li class="toctree-l2"><a class="reference internal" href="frontend/index.html#production-build">Production build</a></li>
+<li class="toctree-l2"><a class="reference internal" href="frontend/index.html#pages-overview">Pages overview</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="frontend/pages.html">Pages</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="frontend/pages.html#camerafeeds">CameraFeeds</a></li>
 <li class="toctree-l2"><a class="reference internal" href="frontend/pages.html#tagging">Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="frontend/pages.html#conversion">Conversion</a></li>
 <li class="toctree-l2"><a class="reference internal" href="frontend/pages.html#processing">Processing</a></li>
 <li class="toctree-l2"><a class="reference internal" href="frontend/pages.html#filemanager">FileManager</a></li>
 </ul>
@@ -363,6 +348,7 @@ Recordings are processed with YOLOv8-Pose; results are saved as JSON in <code cl
 <li class="toctree-l1"><a class="reference internal" href="frontend/components.html">Components</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="frontend/components.html#module-src-components-Toast">Toast</a></li>
 <li class="toctree-l2"><a class="reference internal" href="frontend/components.html#module-src-components-Layout">Layout</a></li>
+<li class="toctree-l2"><a class="reference internal" href="frontend/components.html#module-src-components-ErrorBoundary">ErrorBoundary</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="frontend/utils.html">Utilities &amp; Config</a><ul>
@@ -379,6 +365,8 @@ Recordings are processed with YOLOv8-Pose; results are saved as JSON in <code cl
 <li><p><a class="reference internal" href="search.html"><span class="std std-ref">Search Page</span></a></p></li>
 </ul>
 </section>
+</section>
+</section>
 
         </article>
       </div>
@@ -390,7 +378,7 @@ Recordings are processed with YOLOv8-Pose; results are saved as JSON in <code cl
                 <div class="context">
                   <span>Next</span>
                 </div>
-                <div class="title">API: Main Application (FastAPI)</div>
+                <div class="title">Main Application (FastAPI)</div>
               </div>
               <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
             </a>
@@ -413,8 +401,33 @@ Recordings are processed with YOLOv8-Pose; results are saved as JSON in <code cl
         
       </footer>
     </div>
-    <aside class="toc-drawer no-toc">
+    <aside class="toc-drawer">
       
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">Parkinson Analysis</a><ul>
+<li><a class="reference internal" href="#how-it-all-fits-together">How it all fits together</a><ul>
+<li><a class="reference internal" href="#multi-camera-sync-no-sync-cable">Multi camera sync (no sync cable)</a></li>
+<li><a class="reference internal" href="#known-limitations">Known limitations</a><ul>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
       
       
     </aside>

@@ -10,6 +10,7 @@ Modules:
     camera.py      - Camera source abstraction (RealSense, .bag)
     writers.py     - Video writers (BAG, MP4, FFmpeg)
     processing.py  - Video processing and analysis pipeline
+    conversion.py  - Post-recording BAG→MP4 conversion pipeline
 
 Camera Modes (set via CAMERA_MODE env var):
     auto           - Auto-detect RealSense cameras (DEFAULT)
@@ -18,8 +19,8 @@ Camera Modes (set via CAMERA_MODE env var):
 
 Recording Behavior:
     RealSense cameras:
-        - .bag file (depth + RGB) for processing
-        - .mp4 file (RGB only) for viewing/tagging
+        - .bag file (depth + RGB) only — zero-drop, SDK-managed
+        - .mp4 is generated post-recording via the Conversion page
 
 Camera Priority:
     Camera 0 (CAM1/Front)  is the first detected RealSense device.
@@ -61,15 +62,13 @@ from models import (
     ActionLog,
     SaveTaggingRequest,
     ProcessRequest,
-    RecordingStartRequest
+    RecordingStartRequest,
+    ConversionStartRequest,
 )
 from camera import (
     get_camera_source,
     shutdown_all_cameras,
     camera_sources
-)
-from writers import (
-    create_mp4_writer
 )
 from processing import (
     process_video,
@@ -78,6 +77,14 @@ from processing import (
     cancel_job,
     get_all_jobs,
     is_batch_processing
+)
+from conversion import (
+    convert_bag_to_mp4,
+    create_conversion_job,
+    get_conversion_job,
+    cancel_conversion_job,
+    get_all_conversion_jobs,
+    is_batch_converting,
 )
 
 
@@ -110,16 +117,16 @@ recording_state = {
     "start_time": None,         # Actual recording start (set after warm-up)
     "warmup_start": None,       # When warm-up began (for countdown)
     "timestamp_str": None,      # Timestamp string used for file naming
-    "writers_mp4": {},          # logical_cam_id -> VideoWriter (compressed MP4 for viewing)
     "writers_bag": {},          # logical_cam_id -> True/None (BAG recording via pipeline)
-    "filenames_mp4": {},        # logical_cam_id -> filename
     "filenames_bag": {},        # logical_cam_id -> filename
     "camera_types": {},         # logical_cam_id -> camera_type
-    "frame_size": {},           # logical_cam_id -> (width, height)
-    "frame_counts": {},         # logical_cam_id -> frames written to MP4
-    "fps": DEFAULT_FPS,
+    "fps_per_cam": {},          # logical_cam_id -> actual fps at recording start
     "patient_name": "",
-    "patient_id": ""
+    "patient_id": "",
+    # Sync tracking
+    "recording_start_times": {},    # logical_cam_id -> ISO timestamp
+    "inter_camera_offset_ms": 0.0,  # ms between camera starts
+    "pipeline_restart_ms": {},      # logical_cam_id -> ms for pipeline restart
 }
 recording_lock = threading.Lock()
 
@@ -151,6 +158,10 @@ def get_physical_camera_id(logical_id: int) -> int:
 #                         FRAME STREAMING GENERATOR
 # =============================================================================
 
+STREAM_FPS_IDLE = 30       # Preview FPS when not recording (smooth enough)
+STREAM_FPS_RECORDING = 15  # Preview FPS during recording (save CPU/bandwidth for BAG)
+
+
 def gen_frames(camera_id: int):
     """
     Generate frames from camera for MJPEG streaming.
@@ -158,6 +169,8 @@ def gen_frames(camera_id: int):
     Handles:
         - Reading frames from camera source (via physical ID after swap)
         - JPEG encoding for streaming
+        - FPS throttling: 30 fps idle, 15 fps during recording to save
+          CPU/bandwidth on Jetson AGX Orin with dual RealSense cameras
         - Graceful stream termination when camera goes offline so the browser
           fires onError and the frontend can retry with exponential back-off.
 
@@ -171,6 +184,14 @@ def gen_frames(camera_id: int):
     MAX_OFFLINE_TICKS = 60  # ~2 s at 30 fps; camera hiccups are tolerated
 
     while True:
+        # Determine target FPS based on recording state — checked every frame
+        # so transitions are picked up immediately without restarting the stream.
+        is_recording = recording_state["status"] in ("recording", "warming_up", "paused")
+        target_fps = STREAM_FPS_RECORDING if is_recording else STREAM_FPS_IDLE
+        frame_interval = 1.0 / target_fps
+
+        frame_start = time.monotonic()
+
         # Re-evaluate every frame so a camera swap is picked up immediately
         physical_id = get_physical_camera_id(camera_id)
         camera = get_camera_source(physical_id)
@@ -205,7 +226,11 @@ def gen_frames(camera_id: int):
         _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
         yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
 
-        time.sleep(0.015)
+        # Sleep precisely to hit the target FPS instead of a fixed 15ms
+        elapsed = time.monotonic() - frame_start
+        sleep_time = frame_interval - elapsed
+        if sleep_time > 0:
+            time.sleep(sleep_time)
 
 
 # =============================================================================
@@ -243,10 +268,13 @@ def video_feed(camera_id: int):
 
 def _start_camera_recording(cam_id: int, timestamp_str: str, result_dict: dict):
     """
-    Start BAG + MP4 recording for a single logical camera.
+    Start BAG-only recording for a single logical camera.
 
     Called in parallel threads (one per camera) so both cameras start at
     nearly the same time, minimising the inter-camera frame offset.
+
+    Captures high-precision timestamps (time.monotonic) before and after
+    pipeline restart so the inter-camera start offset can be computed.
 
     Result is stored in result_dict[cam_id] for the caller to inspect.
     """
@@ -259,108 +287,117 @@ def _start_camera_recording(cam_id: int, timestamp_str: str, result_dict: dict):
         return
 
     camera_type = camera.camera_type
-    actual_fps = camera.fps  # Use ACTUAL camera FPS, not DEFAULT_FPS
+    actual_fps = camera.fps
     frame_size = camera.frame_size or (848, 480)
 
     print(f"[Recording] Logical cam {cam_id} (physical {physical_id}): {camera_type} {frame_size}@{actual_fps}fps")
 
-    # BAG recording (RealSense depth + RGB) — restarts pipeline
     bag_filename = f"{timestamp_str}_camera{cam_id + 1}.bag"
     bag_filepath = str(RECORDINGS_DIR / bag_filename)
 
+    # Capture precise timestamps around recording start for sync analysis
+    t_before = time.monotonic()
     bag_success = camera.start_recording(bag_filepath)
+    t_after = time.monotonic()
+
+    recording_started_at = datetime.now().isoformat()
+
     if bag_success:
-        print(f"[Recording] BAG started for logical cam {cam_id}: {bag_filepath}")
+        print(f"[Recording] BAG started for logical cam {cam_id}: {bag_filepath} "
+              f"(pipeline restart took {(t_after - t_before)*1000:.0f}ms)")
     else:
-        print(f"[Recording] BAG failed for logical cam {cam_id}, no high-quality recording")
-
-    # MP4 preview writer — uses actual camera FPS
-    mp4_filename = f"{timestamp_str}_camera{cam_id + 1}.mp4"
-    mp4_filepath = str(RECORDINGS_DIR / mp4_filename)
-
-    writer_mp4 = create_mp4_writer(mp4_filepath, frame_size, actual_fps)
-    print(f"[Recording] MP4 writer for logical cam {cam_id}: {mp4_filepath}, opened={writer_mp4.isOpened()}")
-
-    # Pass MP4 writer to camera capture thread (decoupled from streaming)
-    camera.set_mp4_writer(writer_mp4)
+        print(f"[Recording] BAG failed for logical cam {cam_id}")
 
     result_dict[cam_id] = {
-        "writer_mp4": writer_mp4,
-        "mp4_filename": mp4_filename,
         "bag_filename": bag_filename if bag_success else None,
         "bag_success": bag_success,
         "camera_type": camera_type,
-        "frame_size": frame_size,
         "actual_fps": actual_fps,
+        # Sync tracking — monotonic timestamps for inter-camera offset calculation
+        "recording_start_mono": t_after if bag_success else None,
+        "recording_start_iso": recording_started_at if bag_success else None,
+        "pipeline_restart_ms": round((t_after - t_before) * 1000, 1),
     }
 
 
 def _initialize_recording():
     """
-    Create VideoWriters for all active cameras and start recording.
+    Start BAG recording for all active cameras in parallel.
 
     Both cameras are started in PARALLEL threads so their recording pipelines
     initialise at the same time, minimising the inter-camera start offset.
 
-    Performs slow operations (pipeline restart, writer creation) WITHOUT
-    holding the recording lock to avoid blocking the MJPEG streams.
+    Performs slow operations (pipeline restart) WITHOUT holding the recording
+    lock to avoid blocking the MJPEG streams.
 
-    Orphan handling: if only one camera is running, writers are only
-    created for that camera. No 0-byte files are created for missing cameras.
+    Orphan handling: if only one camera is running, recording is only
+    started for that camera. No empty files are created for missing cameras.
 
     File naming uses the LOGICAL camera ID (not the physical one):
-        Logical 0 → _camera1.bag / _camera1.mp4  (Front/Sagittale)
-        Logical 1 → _camera2.bag / _camera2.mp4  (Side/Frontale)
+        Logical 0 → _camera1.bag  (Front/Sagittale)
+        Logical 1 → _camera2.bag  (Side/Frontale)
     """
-    # Read state under lock
     with recording_lock:
         if recording_state["status"] != "warming_up":
-            print("[Recording] Warm-up cancelled before writers were created")
+            print("[Recording] Warm-up cancelled before recording started")
             return
         timestamp_str = recording_state["timestamp_str"]
 
-    # ---- Launch both cameras in PARALLEL to minimise start-time offset ----
-    writers_info: dict = {}
+    # Launch both cameras in PARALLEL to minimise start-time offset
+    cam_info: dict = {}
     threads = []
     for cam_id in [0, 1]:
         t = threading.Thread(
             target=_start_camera_recording,
-            args=(cam_id, timestamp_str, writers_info),
+            args=(cam_id, timestamp_str, cam_info),
             daemon=True,
         )
         threads.append(t)
         t.start()
 
-    # Wait for both cameras to finish initialising
     for t in threads:
         t.join()
 
-    # Remove cameras that were offline (result_dict stores None for those)
-    writers_info = {k: v for k, v in writers_info.items() if v is not None}
+    # Drop offline cameras (stored as None)
+    cam_info = {k: v for k, v in cam_info.items() if v is not None}
 
-    # Store results under lock
     with recording_lock:
         if recording_state["status"] != "warming_up":
-            # Cancelled during initialization — clean up
-            for cam_id, info in writers_info.items():
-                physical_id = get_physical_camera_id(cam_id)
-                camera = get_camera_source(physical_id)
-                camera.clear_mp4_writer()
-                info["writer_mp4"].release()
+            # Cancelled during startup — stop any BAG pipelines that started
+            for cam_id, info in cam_info.items():
                 if info["bag_success"]:
-                    camera.stop_recording()
-            print("[Recording] Warm-up cancelled during writer initialization")
+                    try:
+                        get_camera_source(get_physical_camera_id(cam_id)).stop_recording()
+                    except Exception:
+                        pass
+            print("[Recording] Warm-up cancelled during recording startup")
             return
 
-        for cam_id, info in writers_info.items():
-            recording_state["writers_mp4"][cam_id] = info["writer_mp4"]
-            recording_state["filenames_mp4"][cam_id] = info["mp4_filename"]
+        for cam_id, info in cam_info.items():
             recording_state["writers_bag"][cam_id] = info["bag_success"]
             recording_state["filenames_bag"][cam_id] = info["bag_filename"]
             recording_state["camera_types"][cam_id] = info["camera_type"]
-            recording_state["frame_size"][cam_id] = info["frame_size"]
-            recording_state["frame_counts"][cam_id] = 0
-            recording_state.setdefault("fps_per_cam", {})[cam_id] = info["actual_fps"]
+            recording_state["fps_per_cam"][cam_id] = info["actual_fps"]
+
+        # Compute inter-camera start offset using monotonic timestamps
+        start_monos = {
+            cid: info["recording_start_mono"]
+            for cid, info in cam_info.items()
+            if info.get("recording_start_mono") is not None
+        }
+        inter_camera_offset_ms = 0.0
+        if len(start_monos) == 2:
+            vals = list(start_monos.values())
+            inter_camera_offset_ms = round(abs(vals[0] - vals[1]) * 1000, 1)
+            print(f"[Recording] Inter-camera start offset: {inter_camera_offset_ms}ms")
+
+        recording_state["recording_start_times"] = {
+            cid: info.get("recording_start_iso") for cid, info in cam_info.items()
+        }
+        recording_state["inter_camera_offset_ms"] = inter_camera_offset_ms
+        recording_state["pipeline_restart_ms"] = {
+            cid: info.get("pipeline_restart_ms", 0) for cid, info in cam_info.items()
+        }
 
         recording_state["status"] = "recording"
         recording_state["start_time"] = datetime.now()
@@ -397,7 +434,6 @@ def start_recording(data: RecordingStartRequest = None):
         recording_state["patient_id"] = data.patientId if data else ""
         recording_state["timestamp_str"] = timestamp_str
         recording_state["warmup_start"] = timestamp
-        recording_state["frame_counts"] = {}
         recording_state["status"] = "warming_up"
 
     def warmup_then_record():
@@ -417,55 +453,67 @@ def start_recording(data: RecordingStartRequest = None):
 
 @app.post("/recording/pause")
 def pause_recording():
-    """Pause recording."""
+    """
+    Pause recording — pauses BAG writing on all active cameras.
+
+    The RealSense pipeline stays running (MJPEG streaming continues)
+    but frames are no longer written to disk. This gives a true pause
+    so the resulting BAG has no gap/filler frames.
+    """
     with recording_lock:
+        if recording_state["status"] != "recording":
+            return {"status": recording_state["status"], "message": "Not recording"}
         recording_state["status"] = "paused"
-        # Pause MP4 writing on all cameras
-        for cam_id in list(recording_state["writers_mp4"].keys()):
-            physical_id = get_physical_camera_id(cam_id)
-            try:
-                camera = get_camera_source(physical_id)
-                camera.pause_mp4_writer()
-            except Exception:
-                pass
-    return {"status": "paused", "message": "Recording paused"}
+
+    # Pause BAG recording on all active cameras (outside lock to avoid blocking)
+    for cam_id in list(recording_state["writers_bag"].keys()):
+        if recording_state["writers_bag"].get(cam_id):
+            physical_cam = get_camera_source(get_physical_camera_id(cam_id))
+            if not physical_cam.pause_recording():
+                print(f"[Recording] Warning: failed to pause BAG on cam {cam_id}")
+
+    return {"status": "paused", "message": "Recording paused (BAG writing stopped)"}
 
 
 @app.post("/recording/resume")
 def resume_recording():
-    """Resume recording."""
+    """
+    Resume recording — resumes BAG writing on all active cameras.
+
+    Both cameras are resumed in parallel to minimise inter-camera
+    resume offset.
+    """
     with recording_lock:
+        if recording_state["status"] != "paused":
+            return {"status": recording_state["status"], "message": "Not paused"}
         recording_state["status"] = "recording"
-        # Resume MP4 writing on all cameras
-        for cam_id in list(recording_state["writers_mp4"].keys()):
-            physical_id = get_physical_camera_id(cam_id)
-            try:
-                camera = get_camera_source(physical_id)
-                camera.resume_mp4_writer()
-            except Exception:
-                pass
+
+    # Resume BAG recording on all active cameras
+    for cam_id in list(recording_state["writers_bag"].keys()):
+        if recording_state["writers_bag"].get(cam_id):
+            physical_cam = get_camera_source(get_physical_camera_id(cam_id))
+            if not physical_cam.resume_recording():
+                print(f"[Recording] Warning: failed to resume BAG on cam {cam_id}")
+
     return {"status": "recording", "message": "Recording resumed"}
 
 
 @app.post("/recording/stop")
 def stop_recording():
     """
-    Stop recording and save files with metadata sidecars.
+    Stop recording and save BAG files with metadata sidecars.
 
-    RealSense cameras produce: .bag + .mp4
-    If called during warm-up, cancels the warm-up before any writers are created.
-    BAG and MP4 pipelines for both cameras are stopped in parallel to minimise
+    If called during warm-up, cancels before any writers are created.
+    BAG pipelines for both cameras are stopped in parallel to minimise
     the inter-camera stop-time offset.
+
+    MP4 files are NOT created here — use the Conversion page post-recording.
     """
-    mp4_files = []
     bag_files = []
     patient_name = ""
     patient_id = ""
     camera_types = {}
-
-    # Frame counts and FPS captured BEFORE the writers are released
-    _stop_frame_counts: dict = {}
-    _stop_fps: dict = {}
+    fps_per_cam = {}
 
     with recording_lock:
         if recording_state["status"] == "idle":
@@ -476,14 +524,16 @@ def stop_recording():
             recording_state["warmup_start"] = None
             recording_state["timestamp_str"] = None
             recording_state["camera_types"] = {}
-            recording_state["frame_counts"] = {}
+            recording_state["fps_per_cam"] = {}
             recording_state["patient_name"] = ""
             recording_state["patient_id"] = ""
+            recording_state["recording_start_times"] = {}
+            recording_state["inter_camera_offset_ms"] = 0.0
+            recording_state["pipeline_restart_ms"] = {}
             print("[Recording] Warm-up cancelled by stop request")
             return {
                 "status": "idle",
                 "message": "Recording cancelled during warm-up",
-                "mp4_files": [],
                 "bag_files": [],
                 "path": str(RECORDINGS_DIR)
             }
@@ -493,66 +543,39 @@ def stop_recording():
         patient_id = recording_state.get("patient_id", "")
         camera_types = recording_state.get("camera_types", {}).copy()
         fps_per_cam = recording_state.get("fps_per_cam", {}).copy()
-
-        # Collect writers and filenames before clearing state
         writers_bag = dict(recording_state["writers_bag"])
-        writers_mp4 = dict(recording_state["writers_mp4"])
         filenames_bag = dict(recording_state["filenames_bag"])
-        filenames_mp4 = dict(recording_state["filenames_mp4"])
+        inter_camera_offset_ms = recording_state.get("inter_camera_offset_ms", 0.0)
+        recording_start_times = recording_state.get("recording_start_times", {}).copy()
+        pipeline_restart_ms = recording_state.get("pipeline_restart_ms", {}).copy()
 
         # Clear state immediately to prevent concurrent operations
         recording_state["status"] = "idle"
         recording_state["start_time"] = None
         recording_state["warmup_start"] = None
         recording_state["timestamp_str"] = None
-        recording_state["writers_mp4"] = {}
         recording_state["writers_bag"] = {}
-        recording_state["filenames_mp4"] = {}
         recording_state["filenames_bag"] = {}
         recording_state["camera_types"] = {}
-        recording_state["frame_counts"] = {}
         recording_state["fps_per_cam"] = {}
         recording_state["patient_name"] = ""
         recording_state["patient_id"] = ""
+        recording_state["recording_start_times"] = {}
+        recording_state["inter_camera_offset_ms"] = 0.0
+        recording_state["pipeline_restart_ms"] = {}
 
-    # ----- Capture frame counts BEFORE writers are released -----
-    for cam_id in list(writers_mp4.keys()):
-        physical_id = get_physical_camera_id(cam_id)
-        try:
-            camera = camera_sources.get(physical_id)
-            if camera:
-                _stop_frame_counts[cam_id] = camera.get_mp4_frame_count()
-        except Exception:
-            _stop_frame_counts[cam_id] = 0
-        _stop_fps[cam_id] = fps_per_cam.get(cam_id, DEFAULT_FPS)
+    # ----- Stop BAG recordings in PARALLEL -----
+    stop_timestamps: dict = {}  # cam_id -> ISO timestamp when recording actually stopped
 
-    # ----- Clear MP4 writers from camera capture threads (parallel) -----
-    def _clear_writer(cam_id: int):
-        physical_id = get_physical_camera_id(cam_id)
-        try:
-            camera = camera_sources.get(physical_id)
-            if camera:
-                camera.clear_mp4_writer()
-        except Exception as e:
-            print(f"[Recording] Error clearing MP4 writer cam {cam_id}: {e}")
-
-    clear_threads = [threading.Thread(target=_clear_writer, args=(c,), daemon=True)
-                     for c in list(writers_mp4.keys())]
-    for t in clear_threads:
-        t.start()
-    for t in clear_threads:
-        t.join()
-
-    # ----- Stop BAG recordings and release MP4 writers in PARALLEL -----
     def _stop_cam_resources(cam_id: int):
-        """Stop BAG + release MP4 writer for one camera."""
-        # Stop BAG
+        """Stop BAG recording for one camera and collect the filename."""
         is_recording = writers_bag.get(cam_id, False)
         if is_recording:
             print(f"[Recording] Stopping BAG recording logical cam {cam_id}")
             try:
                 physical_cam = get_camera_source(get_physical_camera_id(cam_id))
                 physical_cam.stop_recording()
+                stop_timestamps[cam_id] = datetime.now().isoformat()
             except Exception as e:
                 print(f"[Recording] Error stopping BAG cam {cam_id}: {e}")
 
@@ -568,61 +591,44 @@ def stop_recording():
             except OSError as e:
                 print(f"[Recording] Error checking BAG file {bag_filename}: {e}")
 
-        # Release MP4 writer
-        writer = writers_mp4.get(cam_id)
-        if writer is not None:
-            print(f"[Recording] Releasing MP4 writer logical cam {cam_id}")
-            try:
-                writer.release()
-            except Exception as e:
-                print(f"[Recording] Error releasing MP4 writer cam {cam_id}: {e}")
-
-        mp4_filename = filenames_mp4.get(cam_id)
-        if mp4_filename:
-            filepath = RECORDINGS_DIR / mp4_filename
-            try:
-                exists = filepath.exists()
-                size = filepath.stat().st_size if exists else 0
-                print(f"[Recording] MP4 {mp4_filename}: frames={_stop_frame_counts.get(cam_id, '?')}, exists={exists}, size={size}")
-                if exists and size > 0:
-                    mp4_files.append(mp4_filename)
-            except OSError as e:
-                print(f"[Recording] Error checking MP4 file {mp4_filename}: {e}")
-
-    all_cam_ids = set(list(writers_bag.keys()) + list(writers_mp4.keys()))
-    stop_threads = [threading.Thread(target=_stop_cam_resources, args=(c,), daemon=True)
-                    for c in all_cam_ids]
+    stop_threads = [
+        threading.Thread(target=_stop_cam_resources, args=(c,), daemon=True)
+        for c in list(writers_bag.keys())
+    ]
     for t in stop_threads:
         t.start()
     for t in stop_threads:
         t.join()
 
-    # Save metadata sidecar for each MP4 file
-    for mp4_file in mp4_files:
-        base_name = mp4_file.replace('.mp4', '')
+    # Save metadata sidecar for each BAG file — includes sync tracking data
+    for bag_file in bag_files:
+        base_name = bag_file.replace('.bag', '')
         metadata_file = f"{base_name}_metadata.json"
         metadata_path = RECORDINGS_DIR / metadata_file
 
         cam_id = 0 if '_camera1' in base_name else 1 if '_camera2' in base_name else -1
         cam_type = camera_types.get(cam_id, CAMERA_TYPE_REALSENSE)
-        # Logical cam_id 0 = Front/Sagittale, cam_id 1 = Side/Frontale
         camera_view = "Front" if cam_id == 0 else "Side"
-
-        # Try to retrieve frame counts saved during stop
-        cam_mp4_frames = _stop_frame_counts.get(cam_id, 0)
 
         metadata_content = {
             "patient_name": patient_name,
             "patient_id": patient_id,
-            "mp4_file": mp4_file,
-            "bag_file": mp4_file.replace('.mp4', '.bag'),
-            "hq_file": mp4_file.replace('.mp4', '.bag'),
+            "bag_file": bag_file,
             "camera_type": cam_type,
-            "camera_view": camera_view,  # "Front" or "Side" for tagging page
-            "fps": _stop_fps.get(cam_id, DEFAULT_FPS),  # Actual recording FPS
-            "mp4_frames": cam_mp4_frames,               # Frames written to MP4
+            "camera_view": camera_view,
+            "fps": fps_per_cam.get(cam_id, DEFAULT_FPS),
             "recorded_at": datetime.now().isoformat(),
-            "camera_mode": CAMERA_MODE
+            "camera_mode": CAMERA_MODE,
+            # Sync tracking — per-camera start/stop times and inter-camera offset
+            "recording_started_at": recording_start_times.get(cam_id),
+            "recording_stopped_at": stop_timestamps.get(cam_id),
+            "inter_camera_offset_ms": inter_camera_offset_ms,
+            "pipeline_restart_ms": pipeline_restart_ms.get(cam_id, 0),
+            # MP4 fields — populated by conversion.py after BAG→MP4 conversion
+            "mp4_file": None,
+            "mp4_frames": None,
+            "mp4_source": None,
+            "converted_at": None,
         }
         metadata_path.write_text(json.dumps(metadata_content, indent=2))
         print(f"[Recording] Metadata saved: {metadata_file}")
@@ -630,7 +636,6 @@ def stop_recording():
     return {
         "status": "idle",
         "message": "Recording stopped",
-        "mp4_files": mp4_files,
         "bag_files": bag_files,
         "path": str(RECORDINGS_DIR)
     }
@@ -645,8 +650,7 @@ def get_recording_status():
         status:            idle | warming_up | recording | paused
         duration:          seconds elapsed since recording started (None during warm-up)
         warmup_remaining:  seconds left in warm-up countdown (None when not warming up)
-        frame_counts:      dict of camera_id -> frames written to MP4
-        current_filenames: dict of "camN_mp4/bag" -> filename (populated after warm-up)
+        current_filenames: dict of "camN_bag" -> filename (populated after warm-up)
     """
     with recording_lock:
         status = recording_state["status"]
@@ -664,23 +668,9 @@ def get_recording_status():
             warmup_remaining = max(0.0, WARMUP_DURATION - elapsed)
 
         current_filenames: dict = {}
-        for cam_id, fname in recording_state["filenames_mp4"].items():
-            if fname:
-                current_filenames[f"cam{cam_id}_mp4"] = fname
         for cam_id, fname in recording_state["filenames_bag"].items():
             if fname:
                 current_filenames[f"cam{cam_id}_bag"] = fname
-
-        # Get live frame counts from camera capture threads
-        live_frame_counts = {}
-        if status in ("recording", "paused"):
-            for cam_id in list(recording_state.get("writers_mp4", {}).keys()):
-                physical_id = get_physical_camera_id(cam_id)
-                camera = camera_sources.get(physical_id)
-                if camera:
-                    live_frame_counts[cam_id] = camera.get_mp4_frame_count()
-                else:
-                    live_frame_counts[cam_id] = 0
 
         return {
             "status": status,
@@ -689,7 +679,6 @@ def get_recording_status():
             "start_time": start_time.isoformat() if start_time else None,
             "duration": duration,
             "warmup_remaining": warmup_remaining,
-            "frame_counts": live_frame_counts,
             "current_filenames": current_filenames,
         }
 
@@ -873,6 +862,8 @@ def list_batches():
                     "camera2": None,
                     "camera1_hq": None,
                     "camera2_hq": None,
+                    "camera1_has_mp4": False,
+                    "camera2_has_mp4": False,
                     "camera1_type": None,
                     "camera2_type": None,
                     "complete": False,
@@ -882,13 +873,16 @@ def list_batches():
                 }
 
             mp4_file = RECORDINGS_DIR / f"{name}.mp4"
+            mp4_exists = mp4_file.exists()
             if camera_num == "1":
                 batches[batch_id]["camera1_hq"] = f.name
-                batches[batch_id]["camera1"] = mp4_file.name if mp4_file.exists() else f.name
+                batches[batch_id]["camera1"] = mp4_file.name if mp4_exists else f.name
+                batches[batch_id]["camera1_has_mp4"] = mp4_exists
                 batches[batch_id]["camera1_type"] = CAMERA_TYPE_REALSENSE
             elif camera_num == "2":
                 batches[batch_id]["camera2_hq"] = f.name
-                batches[batch_id]["camera2"] = mp4_file.name if mp4_file.exists() else f.name
+                batches[batch_id]["camera2"] = mp4_file.name if mp4_exists else f.name
+                batches[batch_id]["camera2_has_mp4"] = mp4_exists
                 batches[batch_id]["camera2_type"] = CAMERA_TYPE_REALSENSE
 
             mtime = datetime.fromtimestamp(f.stat().st_mtime).isoformat()
@@ -960,7 +954,7 @@ def get_frame_comparison(batch_id: str):
             "fps": DEFAULT_FPS,
         }
 
-        # Read FPS and MP4 frame count from sidecar (fast, no need to decode)
+        # Read FPS, sync data, and MP4 frame count from sidecar
         if meta_path.exists():
             try:
                 meta = json.loads(meta_path.read_text())
@@ -968,6 +962,11 @@ def get_frame_comparison(batch_id: str):
                 sidecar_mp4_frames = meta.get("mp4_frames")
                 if sidecar_mp4_frames:
                     cam_result["mp4_frames_from_sidecar"] = sidecar_mp4_frames
+                # Sync tracking data from recording
+                cam_result["recording_started_at"] = meta.get("recording_started_at")
+                cam_result["recording_stopped_at"] = meta.get("recording_stopped_at")
+                cam_result["inter_camera_offset_ms"] = meta.get("inter_camera_offset_ms", 0)
+                cam_result["pipeline_restart_ms"] = meta.get("pipeline_restart_ms", 0)
             except Exception:
                 pass
 
@@ -1046,16 +1045,60 @@ def get_frame_comparison(batch_id: str):
     # Cross-camera synchronisation comparison
     cam1_frames = results.get("camera1", {}).get("mp4_frames")
     cam2_frames = results.get("camera2", {}).get("mp4_frames")
+    cam1_bag_frames = results.get("camera1", {}).get("bag_frames")
+    cam2_bag_frames = results.get("camera2", {}).get("bag_frames")
     sync_info = {}
     if cam1_frames and cam2_frames:
+        fps = results.get("camera1", {}).get("fps") or DEFAULT_FPS
+
         sync_info["cam1_mp4_frames"] = cam1_frames
         sync_info["cam2_mp4_frames"] = cam2_frames
         sync_info["frame_count_difference"] = abs(cam1_frames - cam2_frames)
-        fps = results.get("camera1", {}).get("fps") or DEFAULT_FPS
         sync_info["time_offset_seconds"] = round(
             abs(cam1_frames - cam2_frames) / fps if fps > 0 else 0, 3
         )
-        sync_info["in_sync"] = sync_info["frame_count_difference"] <= int(fps)  # within 1 second
+
+        # BAG-level frame sync (before conversion — more reliable)
+        if cam1_bag_frames and cam2_bag_frames:
+            sync_info["cam1_bag_frames"] = cam1_bag_frames
+            sync_info["cam2_bag_frames"] = cam2_bag_frames
+            sync_info["bag_frame_count_difference"] = abs(cam1_bag_frames - cam2_bag_frames)
+            sync_info["bag_time_offset_seconds"] = round(
+                abs(cam1_bag_frames - cam2_bag_frames) / fps if fps > 0 else 0, 3
+            )
+
+        # Inter-camera recording start offset (from metadata — ground truth)
+        inter_offset = results.get("camera1", {}).get("inter_camera_offset_ms", 0)
+        if not inter_offset:
+            inter_offset = results.get("camera2", {}).get("inter_camera_offset_ms", 0)
+        sync_info["recording_start_offset_ms"] = inter_offset
+
+        # Pipeline restart times per camera
+        sync_info["cam1_pipeline_restart_ms"] = results.get("camera1", {}).get("pipeline_restart_ms", 0)
+        sync_info["cam2_pipeline_restart_ms"] = results.get("camera2", {}).get("pipeline_restart_ms", 0)
+
+        # Sync assessment — considers both frame count diff and recording start offset
+        frame_offset_ok = sync_info["frame_count_difference"] <= int(fps)  # within 1 second
+        start_offset_ok = inter_offset <= 500  # within 500ms
+        sync_info["in_sync"] = frame_offset_ok and start_offset_ok
+
+        # Sync quality level for UI
+        if inter_offset <= 100 and sync_info["frame_count_difference"] <= int(fps * 0.5):
+            sync_info["sync_quality"] = "excellent"  # <100ms offset, <0.5s frame diff
+        elif frame_offset_ok and start_offset_ok:
+            sync_info["sync_quality"] = "good"
+        elif frame_offset_ok or start_offset_ok:
+            sync_info["sync_quality"] = "fair"
+        else:
+            sync_info["sync_quality"] = "poor"
+
+        # Warning if bags themselves weren't synced (impacts MP4 sync too)
+        if not start_offset_ok:
+            sync_info["warning"] = (
+                f"Cameras started {inter_offset:.0f}ms apart. "
+                "MP4 files inherit this offset — they cannot be more synced than the source BAGs. "
+                "No hardware sync cable available."
+            )
 
     return {
         "batch_id": batch_id,
@@ -1363,6 +1406,80 @@ def list_processing_jobs():
 
 
 # =============================================================================
+#                        CONVERSION ROUTES
+# =============================================================================
+
+@app.post("/conversion/start")
+def start_conversion(data: ConversionStartRequest):
+    """
+    Start BAG→MP4 conversion for a batch.
+
+    Both cameras of the batch are converted in parallel. Batches are sequential
+    (only one batch can convert at a time per job). Uses h264_nvenc on Jetson
+    (NVENC hardware encoder), falls back to libx264 if unavailable.
+
+    Set force=True to re-convert even if an MP4 already exists.
+    """
+    batch_id = data.batch_id
+
+    camera1_bag = RECORDINGS_DIR / f"{batch_id}_camera1.bag"
+    camera2_bag = RECORDINGS_DIR / f"{batch_id}_camera2.bag"
+    has_cam1 = camera1_bag.exists()
+    has_cam2 = camera2_bag.exists()
+
+    if not has_cam1 and not has_cam2:
+        return {"success": False, "message": "No BAG files found for this batch"}
+
+    is_converting, existing_job_id = is_batch_converting(batch_id)
+    if is_converting:
+        return {
+            "success": False,
+            "message": "Batch already being converted",
+            "job_id": existing_job_id
+        }
+
+    job_id = create_conversion_job(batch_id, has_cam1, has_cam2, force=data.force)
+    is_orphan = (has_cam1 or has_cam2) and not (has_cam1 and has_cam2)
+
+    t = threading.Thread(
+        target=convert_bag_to_mp4,
+        args=(job_id, batch_id, has_cam1, has_cam2),
+        daemon=True,
+    )
+    t.start()
+
+    return {
+        "success": True,
+        "message": f"Conversion started ({'orphan' if is_orphan else 'both cameras'})",
+        "job_id": job_id,
+        "is_orphan": is_orphan,
+    }
+
+
+@app.get("/conversion/status/{job_id}")
+def get_conversion_status(job_id: str):
+    """Get conversion job status."""
+    job = get_conversion_job(job_id)
+    if not job:
+        return {"success": False, "message": "Job not found"}
+    return {"success": True, "job": job}
+
+
+@app.post("/conversion/cancel/{job_id}")
+def cancel_conversion(job_id: str):
+    """Cancel a conversion job."""
+    if cancel_conversion_job(job_id):
+        return {"success": True, "message": "Conversion cancelled"}
+    return {"success": False, "message": "Job not found"}
+
+
+@app.get("/conversion/jobs")
+def list_conversion_jobs():
+    """List all conversion jobs."""
+    return {"jobs": get_all_conversion_jobs()}
+
+
+# =============================================================================
 #                        FILE MANAGEMENT ROUTES
 # =============================================================================
 
@@ -1400,6 +1517,8 @@ def list_all_files():
                     "camera2_hq_size": 0,
                     "camera1_mp4_size": 0,
                     "camera2_mp4_size": 0,
+                    "camera1_has_mp4": False,
+                    "camera2_has_mp4": False,
                     "camera1_bag_name": None,
                     "camera2_bag_name": None,
                     "camera1_type": None,
@@ -1411,10 +1530,11 @@ def list_all_files():
             mtime = datetime.fromtimestamp(f.stat().st_mtime).isoformat()
 
             mp4_path = RECORDINGS_DIR / f"{name}.mp4"
-            mp4_size = mp4_path.stat().st_size if mp4_path.exists() else 0
+            mp4_exists = mp4_path.exists()
+            mp4_size = mp4_path.stat().st_size if mp4_exists else 0
 
             file_info = {
-                "name": mp4_path.name if mp4_path.exists() else f.name,
+                "name": mp4_path.name if mp4_exists else f.name,
                 "size": hq_size + mp4_size
             }
 
@@ -1423,6 +1543,7 @@ def list_all_files():
                 batches[batch_id]["camera1_size"] = hq_size + mp4_size
                 batches[batch_id]["camera1_hq_size"] = hq_size
                 batches[batch_id]["camera1_mp4_size"] = mp4_size
+                batches[batch_id]["camera1_has_mp4"] = mp4_exists
                 batches[batch_id]["camera1_bag_name"] = f.name
                 batches[batch_id]["camera1_type"] = CAMERA_TYPE_REALSENSE
             elif camera_num == "2":
@@ -1430,6 +1551,7 @@ def list_all_files():
                 batches[batch_id]["camera2_size"] = hq_size + mp4_size
                 batches[batch_id]["camera2_hq_size"] = hq_size
                 batches[batch_id]["camera2_mp4_size"] = mp4_size
+                batches[batch_id]["camera2_has_mp4"] = mp4_exists
                 batches[batch_id]["camera2_bag_name"] = f.name
                 batches[batch_id]["camera2_type"] = CAMERA_TYPE_REALSENSE
 

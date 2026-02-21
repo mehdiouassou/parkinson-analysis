@@ -193,6 +193,7 @@
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../backend/main.html">API: Main Application (FastAPI)</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../backend/processing.html">API: Processing (YOLOv8 &amp; Motion)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/conversion.html">Conversion Pipeline</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../backend/camera.html">API: Camera Interface (RealSense/Bag)</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../backend/config.html">API: Configuration</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../backend/models.html">API: Data Models (Pydantic)</a></li>
@@ -258,7 +259,7 @@
 <span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">datetime</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Optional</span>
 
-<span class="kn">from</span><span class="w"> </span><span class="nn">config</span><span class="w"> </span><span class="kn">import</span> <span class="n">RECORDINGS_DIR</span><span class="p">,</span> <span class="n">PROCESSED_DIR</span><span class="p">,</span> <span class="n">MODELS_DIR</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">config</span><span class="w"> </span><span class="kn">import</span> <span class="n">RECORDINGS_DIR</span><span class="p">,</span> <span class="n">PROCESSED_DIR</span><span class="p">,</span> <span class="n">MODELS_DIR</span><span class="p">,</span> <span class="n">DEFAULT_FPS</span>
 
 <span class="c1"># Try to import pyrealsense2 for BAG file processing</span>
 <span class="k">try</span><span class="p">:</span>
@@ -693,24 +694,45 @@
         <span class="c1"># ---------------------------------------------------------------------</span>
         <span class="c1">#                    STEP 1: Initialize (0-5%)</span>
         <span class="c1"># ---------------------------------------------------------------------</span>
-        
+
         <span class="n">update_job_progress</span><span class="p">(</span><span class="n">job_id</span><span class="p">,</span> <span class="n">camera_num</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="s2">&quot;Initializing...&quot;</span><span class="p">)</span>
-        
-        
+
+
         <span class="c1"># ---------------------------------------------------------------------</span>
-        <span class="c1">#                  STEP 2: Load Video (5-10%)</span>
+        <span class="c1">#               STEP 2: Load Patient Metadata (5-8%)</span>
+        <span class="c1"># Load metadata FIRST so the recorded FPS is available as a fallback</span>
+        <span class="c1"># when the video container does not embed FPS (can happen with BAG</span>
+        <span class="c1"># files or improperly muxed MP4s).</span>
         <span class="c1"># ---------------------------------------------------------------------</span>
-        
+
+        <span class="n">update_job_progress</span><span class="p">(</span><span class="n">job_id</span><span class="p">,</span> <span class="n">camera_num</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="s2">&quot;Loading metadata...&quot;</span><span class="p">)</span>
+
+        <span class="n">patient_info</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;patient_name&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;patient_id&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;recorded_at&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">}</span>
+        <span class="n">meta_fps</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">metadata_file</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">patient_info</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">metadata_file</span><span class="o">.</span><span class="n">read_text</span><span class="p">())</span>
+                <span class="n">raw_meta_fps</span> <span class="o">=</span> <span class="n">patient_info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;fps&quot;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">raw_meta_fps</span> <span class="ow">and</span> <span class="nb">float</span><span class="p">(</span><span class="n">raw_meta_fps</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">meta_fps</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">raw_meta_fps</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+                <span class="k">pass</span>
+
+
+        <span class="c1"># ---------------------------------------------------------------------</span>
+        <span class="c1">#                  STEP 3: Load Video (8-12%)</span>
+        <span class="c1"># ---------------------------------------------------------------------</span>
+
         <span class="k">if</span> <span class="n">use_bag</span><span class="p">:</span>
             <span class="n">format_used</span> <span class="o">=</span> <span class="s2">&quot;BAG (RealSense)&quot;</span>
         <span class="k">else</span><span class="p">:</span>
             <span class="n">format_used</span> <span class="o">=</span> <span class="s2">&quot;MP4&quot;</span>
-        
-        <span class="n">update_job_progress</span><span class="p">(</span><span class="n">job_id</span><span class="p">,</span> <span class="n">camera_num</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;Opening video (</span><span class="si">{</span><span class="n">format_used</span><span class="si">}</span><span class="s2">)...&quot;</span><span class="p">)</span>
-        
+
+        <span class="n">update_job_progress</span><span class="p">(</span><span class="n">job_id</span><span class="p">,</span> <span class="n">camera_num</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;Opening video (</span><span class="si">{</span><span class="n">format_used</span><span class="si">}</span><span class="s2">)...&quot;</span><span class="p">)</span>
+
         <span class="k">if</span> <span class="ow">not</span> <span class="n">video_file</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
             <span class="k">raise</span> <span class="ne">FileNotFoundError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Video file not found: </span><span class="si">{</span><span class="n">video_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-        
+
         <span class="c1"># Use appropriate reader based on file type</span>
         <span class="k">if</span> <span class="n">use_bag</span><span class="p">:</span>
             <span class="n">cap</span> <span class="o">=</span> <span class="n">BagFileReader</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">video_file</span><span class="p">))</span>
@@ -719,15 +741,20 @@
         <span class="k">else</span><span class="p">:</span>
             <span class="n">cap</span> <span class="o">=</span> <span class="n">cv2</span><span class="o">.</span><span class="n">VideoCapture</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">video_file</span><span class="p">))</span>
             <span class="n">total_frames</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">cap</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cv2</span><span class="o">.</span><span class="n">CAP_PROP_FRAME_COUNT</span><span class="p">))</span>
-        
+
         <span class="k">if</span> <span class="ow">not</span> <span class="n">cap</span><span class="o">.</span><span class="n">isOpened</span><span class="p">():</span>
             <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed to open video: </span><span class="si">{</span><span class="n">video_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-        
-        <span class="n">fps</span> <span class="o">=</span> <span class="n">cap</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cv2</span><span class="o">.</span><span class="n">CAP_PROP_FPS</span><span class="p">)</span> <span class="ow">or</span> <span class="mi">20</span>
+
+        <span class="c1"># Prefer the value saved in the metadata sidecar (exact recording FPS)</span>
+        <span class="c1"># if available. Fall back to the video container FPS, then to</span>
+        <span class="c1"># DEFAULT_FPS.</span>
+        <span class="n">cap_fps</span> <span class="o">=</span> <span class="n">cap</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cv2</span><span class="o">.</span><span class="n">CAP_PROP_FPS</span><span class="p">)</span>
+        <span class="n">fps</span> <span class="o">=</span> <span class="n">meta_fps</span> <span class="k">if</span> <span class="n">meta_fps</span> <span class="ow">and</span> <span class="n">meta_fps</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="p">(</span><span class="n">cap_fps</span> <span class="k">if</span> <span class="n">cap_fps</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="n">DEFAULT_FPS</span><span class="p">)</span>
+
         <span class="n">width</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">cap</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cv2</span><span class="o">.</span><span class="n">CAP_PROP_FRAME_WIDTH</span><span class="p">))</span>
         <span class="n">height</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">cap</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cv2</span><span class="o">.</span><span class="n">CAP_PROP_FRAME_HEIGHT</span><span class="p">))</span>
         <span class="n">duration</span> <span class="o">=</span> <span class="n">total_frames</span> <span class="o">/</span> <span class="n">fps</span> <span class="k">if</span> <span class="n">total_frames</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">fps</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="mi">0</span>
-        
+
         <span class="n">video_info</span> <span class="o">=</span> <span class="p">{</span>
             <span class="s2">&quot;frames&quot;</span><span class="p">:</span> <span class="n">total_frames</span><span class="p">,</span>
             <span class="s2">&quot;fps&quot;</span><span class="p">:</span> <span class="n">fps</span><span class="p">,</span>
@@ -736,32 +763,18 @@
             <span class="s2">&quot;duration&quot;</span><span class="p">:</span> <span class="n">duration</span><span class="p">,</span>
             <span class="s2">&quot;format&quot;</span><span class="p">:</span> <span class="n">format_used</span>
         <span class="p">}</span>
-        
+
         <span class="k">if</span> <span class="n">total_frames</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
-            <span class="n">update_job_progress</span><span class="p">(</span><span class="n">job_id</span><span class="p">,</span> <span class="n">camera_num</span><span class="p">,</span> <span class="mi">10</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;Loaded </span><span class="si">{</span><span class="n">total_frames</span><span class="si">}</span><span class="s2"> frames&quot;</span><span class="p">)</span>
+            <span class="n">update_job_progress</span><span class="p">(</span><span class="n">job_id</span><span class="p">,</span> <span class="n">camera_num</span><span class="p">,</span> <span class="mi">12</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;Loaded </span><span class="si">{</span><span class="n">total_frames</span><span class="si">}</span><span class="s2"> frames @ </span><span class="si">{</span><span class="n">fps</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2"> fps&quot;</span><span class="p">)</span>
         <span class="k">else</span><span class="p">:</span>
-            <span class="n">update_job_progress</span><span class="p">(</span><span class="n">job_id</span><span class="p">,</span> <span class="n">camera_num</span><span class="p">,</span> <span class="mi">10</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;Loaded </span><span class="si">{</span><span class="n">format_used</span><span class="si">}</span><span class="s2"> stream&quot;</span><span class="p">)</span>
-        
-        
-        <span class="c1"># ---------------------------------------------------------------------</span>
-        <span class="c1">#               STEP 3: Load Patient Metadata (10-12%)</span>
-        <span class="c1"># ---------------------------------------------------------------------</span>
-        
-        <span class="n">update_job_progress</span><span class="p">(</span><span class="n">job_id</span><span class="p">,</span> <span class="n">camera_num</span><span class="p">,</span> <span class="mi">11</span><span class="p">,</span> <span class="s2">&quot;Loading metadata...&quot;</span><span class="p">)</span>
-        
-        <span class="n">patient_info</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;patient_name&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;patient_id&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;recorded_at&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">}</span>
-        <span class="k">if</span> <span class="n">metadata_file</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
-            <span class="k">try</span><span class="p">:</span>
-                <span class="n">patient_info</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">metadata_file</span><span class="o">.</span><span class="n">read_text</span><span class="p">())</span>
-            <span class="k">except</span><span class="p">:</span>
-                <span class="k">pass</span>
+            <span class="n">update_job_progress</span><span class="p">(</span><span class="n">job_id</span><span class="p">,</span> <span class="n">camera_num</span><span class="p">,</span> <span class="mi">12</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;Loaded </span><span class="si">{</span><span class="n">format_used</span><span class="si">}</span><span class="s2"> stream @ </span><span class="si">{</span><span class="n">fps</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2"> fps&quot;</span><span class="p">)</span>
         
         
         <span class="c1"># ---------------------------------------------------------------------</span>
         <span class="c1">#          STEP 4: Process Frames (12-90%) - YOLO POSE DETECTION</span>
         <span class="c1"># ---------------------------------------------------------------------</span>
 
-        <span class="n">update_job_progress</span><span class="p">(</span><span class="n">job_id</span><span class="p">,</span> <span class="n">camera_num</span><span class="p">,</span> <span class="mi">12</span><span class="p">,</span> <span class="s2">&quot;Processing frames with pose detection...&quot;</span><span class="p">)</span>
+        <span class="n">update_job_progress</span><span class="p">(</span><span class="n">job_id</span><span class="p">,</span> <span class="n">camera_num</span><span class="p">,</span> <span class="mi">13</span><span class="p">,</span> <span class="s2">&quot;Processing frames with pose detection...&quot;</span><span class="p">)</span>
 
         <span class="k">if</span> <span class="ow">not</span> <span class="n">HAS_GPU_AI</span> <span class="ow">or</span> <span class="n">ai_model</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;YOLOv8-Pose not available. Cannot process video without GPU AI engine.&quot;</span><span class="p">)</span>

@@ -3,10 +3,10 @@
   <head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="Conversion Pipeline" href="conversion.html"><link rel="prev" title="Camera Interface" href="camera.html">
+<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="Processing Pipeline (YOLOv8)" href="processing.html"><link rel="prev" title="Configuration" href="config.html">
 
     <!-- Generated with Sphinx 8.1.3 and Furo 2025.12.19 -->
-        <title>Configuration - Parkinson Analysis 1.0.0 documentation</title>
+        <title>Conversion Pipeline - Parkinson Analysis 1.0.0 documentation</title>
       <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
@@ -194,8 +194,8 @@
 <ul class="current">
 <li class="toctree-l1"><a class="reference internal" href="main.html">Main Application (FastAPI)</a></li>
 <li class="toctree-l1"><a class="reference internal" href="camera.html">Camera Interface</a></li>
-<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">Configuration</a></li>
-<li class="toctree-l1"><a class="reference internal" href="conversion.html">Conversion Pipeline</a></li>
+<li class="toctree-l1"><a class="reference internal" href="config.html">Configuration</a></li>
+<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">Conversion Pipeline</a></li>
 <li class="toctree-l1"><a class="reference internal" href="processing.html">Processing Pipeline (YOLOv8)</a></li>
 <li class="toctree-l1"><a class="reference internal" href="models.html">Data Models (Pydantic)</a></li>
 <li class="toctree-l1"><a class="reference internal" href="writers.html">Writers</a></li>
@@ -226,7 +226,7 @@
         </a>
         <div class="content-icon-container">
           <div class="view-this-page">
-  <a class="muted-link" href="../_sources/backend/config.rst.txt" title="View this page">
+  <a class="muted-link" href="../_sources/backend/conversion.rst.txt" title="View this page">
     <svg><use href="#svg-eye"></use></svg>
     <span class="visually-hidden">View this page</span>
   </a>
@@ -244,122 +244,84 @@
           </label>
         </div>
         <article role="main" id="furo-main-content">
-          <section id="configuration">
-<h1>Configuration<a class="headerlink" href="#configuration" title="Link to this heading">¶</a></h1>
-<p>Environment variables, directory paths, device detection and video settings. Everything the
-backend needs to know about the runtime environment lives here.</p>
-<section id="environment-variables">
-<h2>Environment variables<a class="headerlink" href="#environment-variables" title="Link to this heading">¶</a></h2>
-<ul class="simple">
-<li><p><code class="docutils literal notranslate"><span class="pre">CAMERA_MODE</span></code>: <code class="docutils literal notranslate"><span class="pre">auto</span></code> (default), <code class="docutils literal notranslate"><span class="pre">realsense</span></code>, or <code class="docutils literal notranslate"><span class="pre">mock_bag</span></code></p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">REMOTE_MODE</span></code>: set to <code class="docutils literal notranslate"><span class="pre">true</span></code> for Jetson remote access (sets host to 0.0.0.0)</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">API_HOST</span></code>: override the API host directly</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">BAG_FILE_CAM1</span></code> / <code class="docutils literal notranslate"><span class="pre">BAG_FILE_CAM2</span></code>: paths to .bag files for mock_bag mode</p></li>
-</ul>
+          <section id="conversion-pipeline">
+<h1>Conversion Pipeline<a class="headerlink" href="#conversion-pipeline" title="Link to this heading">¶</a></h1>
+<p>Converts recorded RealSense .bag files to browser playable .mp4 using FFmpeg.
+This is a post recording step since we dont want FFmpeg competing for CPU during capture.</p>
+<section id="how-it-works">
+<h2>How it works<a class="headerlink" href="#how-it-works" title="Link to this heading">¶</a></h2>
+<ol class="arabic simple">
+<li><p>BAG file is replayed through pyrealsense2 in non realtime mode (fast as disk IO)</p></li>
+<li><p>Color frames are extracted as BGR24 numpy arrays</p></li>
+<li><p>Frames are piped to FFmpeg stdin as raw video</p></li>
+<li><p>FFmpeg encodes them. Tries <code class="docutils literal notranslate"><span class="pre">h264_nvenc</span></code> first (Jetson NVENC hardware encoder)
+then falls back to <code class="docutils literal notranslate"><span class="pre">libx264</span></code> (CPU) if NVENC isnt available</p></li>
+<li><p>Output written to <code class="docutils literal notranslate"><span class="pre">&lt;name&gt;.mp4.converting</span></code> temp file</p></li>
+<li><p>Frame count validated: MP4 must have &gt;= 95% of BAG frames</p></li>
+<li><p>If validation passes temp file renamed to <code class="docutils literal notranslate"><span class="pre">.mp4</span></code>, otherwise deleted and next encoder tried</p></li>
+<li><p>Metadata sidecar updated with MP4 filename, frame count and conversion timestamp</p></li>
+</ol>
+<p>Both cameras of a batch convert in parallel threads. Batches are sequential (one at a time).</p>
+<p>Job lifecycle: <code class="docutils literal notranslate"><span class="pre">pending</span> <span class="pre">-&gt;</span> <span class="pre">converting</span> <span class="pre">-&gt;</span> <span class="pre">done</span> <span class="pre">|</span> <span class="pre">failed</span> <span class="pre">|</span> <span class="pre">cancelled</span></code></p>
 </section>
-<section id="video-settings">
-<h2>Video settings<a class="headerlink" href="#video-settings" title="Link to this heading">¶</a></h2>
-<ul class="simple">
-<li><p>Resolution: 848x480 (hardcoded, D455 native)</p></li>
-<li><p>Dual camera FPS: 60fps target, 30fps fallback (USB bandwidth dependent)</p></li>
-<li><p>Single camera FPS: 60fps</p></li>
-<li><p>JPEG quality for streaming: 70</p></li>
-<li><p>Default FPS (for metadata fallback): 30</p></li>
-</ul>
+<section id="safety">
+<h2>Safety<a class="headerlink" href="#safety" title="Link to this heading">¶</a></h2>
+<p>The temp file approach means you never end up with a partial .mp4 on disk. If the conversion
+fails or is cancelled the temp file gets cleaned up. If a .mp4 already exists and <code class="docutils literal notranslate"><span class="pre">force</span></code>
+isnt set the conversion is skipped for that camera.</p>
 </section>
-<section id="device-detection">
-<h2>Device detection<a class="headerlink" href="#device-detection" title="Link to this heading">¶</a></h2>
-<p><code class="docutils literal notranslate"><span class="pre">detect_realsense_devices()</span></code> does a single pass query of connected RealSense devices.
-No retries, no waits. If the device is there its instant, if not it returns empty.
-Results are cached and can be refreshed with <code class="docutils literal notranslate"><span class="pre">refresh_camera_detection()</span></code>.</p>
-<p>Devices are mapped to logical camera IDs in order of detection:
-camera 0 = first device (Front), camera 1 = second device (Side).</p>
+<section id="module-conversion">
+<span id="api-reference"></span><h2>API reference<a class="headerlink" href="#module-conversion" title="Link to this heading">¶</a></h2>
+<section id="post-recording-bagmp4-conversion-pipeline">
+<h3>Post-recording BAG→MP4 Conversion Pipeline<a class="headerlink" href="#post-recording-bagmp4-conversion-pipeline" title="Link to this heading">¶</a></h3>
+<p>Converts recorded RealSense .bag files to browser-playable .mp4 using FFmpeg.
+Encoder priority: h264_nvenc (Jetson NVENC hardware) → libx264 (CPU fallback).</p>
+<p>Safety: writes to &lt;name&gt;.mp4.converting temp file first, renames to .mp4 only
+on success, deletes on failure — no partial MP4 files are ever left on disk.</p>
+<dl class="simple">
+<dt>Job lifecycle:</dt><dd><p>pending → converting → done | failed | cancelled</p>
+</dd>
+</dl>
+<p>Both cameras of a batch are converted in PARALLEL; batches are sequential
+(the API caller is responsible for not starting two batches concurrently —
+is_batch_converting() can be used to guard against that).</p>
 </section>
-<section id="module-config">
-<span id="api-reference"></span><h2>API reference<a class="headerlink" href="#module-config" title="Link to this heading">¶</a></h2>
-<p>Configuration and constants for the Parkinson Camera API.</p>
-<dl>
-<dt>Environment Variables:</dt><dd><dl class="simple">
-<dt>CAMERA_MODE: Camera backend mode</dt><dd><ul class="simple">
-<li><p>auto:       Auto-detect RealSense cameras - DEFAULT</p></li>
-<li><p>mock_bag:   Use .bag file playback with pyrealsense2 (for dev)</p></li>
-<li><p>realsense:  Live RealSense cameras (desktop/laptop)</p></li>
-</ul>
-</dd>
-</dl>
-<p>BAG_FILE_CAM1: Path to .bag file for camera 1 (mock_bag mode)
-BAG_FILE_CAM2: Path to .bag file for camera 2 (mock_bag mode)</p>
-<p>REMOTE_MODE: Set to “true” for Jetson remote deployment
-API_HOST: Host for API (default localhost, use 0.0.0.0 for remote)</p>
-</dd>
-<dt>Camera Type Priority:</dt><dd><ul class="simple">
-<li><p>Camera 0 (CAM1/Front) is the first detected RealSense device</p></li>
-<li><p>Camera 1 (CAM2/Side) is the second detected RealSense device</p></li>
-</ul>
-</dd>
-<dt>Recording Behavior:</dt><dd><ul class="simple">
-<li><p>RealSense cameras: .bag (depth + RGB) + .mp4 (RGB preview)</p></li>
-<li><p>Viewing/Tagging always uses .mp4 stream</p></li>
-<li><p>Processing uses .bag (RealSense depth + RGB)</p></li>
-</ul>
-</dd>
-</dl>
 <dl class="py function">
-<dt class="sig sig-object py" id="config.detect_realsense_devices">
-<span class="sig-prename descclassname"><span class="pre">config.</span></span><span class="sig-name descname"><span class="pre">detect_realsense_devices</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/config.html#detect_realsense_devices"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#config.detect_realsense_devices" title="Link to this definition">¶</a></dt>
-<dd><p>Detect connected RealSense devices (FAST, single pass).</p>
-<dl class="field-list simple">
-<dt class="field-odd">Returns<span class="colon">:</span></dt>
-<dd class="field-odd"><p>[{“serial”: “…”, “name”: “…”, “usb_type”: “…”}]</p>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>List of dicts with device info</p>
-</dd>
-</dl>
+<dt class="sig sig-object py" id="conversion.cancel_conversion_job">
+<span class="sig-prename descclassname"><span class="pre">conversion.</span></span><span class="sig-name descname"><span class="pre">cancel_conversion_job</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">job_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="reference internal" href="../_modules/conversion.html#cancel_conversion_job"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#conversion.cancel_conversion_job" title="Link to this definition">¶</a></dt>
+<dd><p>Signal cancellation. Returns False if job not found.</p>
 </dd></dl>
 
 <dl class="py function">
-<dt class="sig sig-object py" id="config.get_camera_type">
-<span class="sig-prename descclassname"><span class="pre">config.</span></span><span class="sig-name descname"><span class="pre">get_camera_type</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">camera_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../_modules/config.html#get_camera_type"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#config.get_camera_type" title="Link to this definition">¶</a></dt>
-<dd><p>Get the type of camera at given logical ID.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>camera_id</strong> – Camera index (0 = Front/Sagittale, 1 = Side/Frontale)</p>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>CAMERA_TYPE_REALSENSE or CAMERA_TYPE_BAG_FILE</p>
-</dd>
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p>Camera type constant</p>
-</dd>
-</dl>
+<dt class="sig sig-object py" id="conversion.convert_bag_to_mp4">
+<span class="sig-prename descclassname"><span class="pre">conversion.</span></span><span class="sig-name descname"><span class="pre">convert_bag_to_mp4</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">job_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">batch_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">has_cam1</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">has_cam2</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/conversion.html#convert_bag_to_mp4"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#conversion.convert_bag_to_mp4" title="Link to this definition">¶</a></dt>
+<dd><p>Convert BAG files to MP4 for a batch.</p>
+<p>Both cameras run in PARALLEL threads. Called in a background thread by
+the /conversion/start API route.</p>
 </dd></dl>
 
 <dl class="py function">
-<dt class="sig sig-object py" id="config.get_detected_cameras">
-<span class="sig-prename descclassname"><span class="pre">config.</span></span><span class="sig-name descname"><span class="pre">get_detected_cameras</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/config.html#get_detected_cameras"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#config.get_detected_cameras" title="Link to this definition">¶</a></dt>
-<dd><p>Get all detected RealSense cameras with their logical IDs.</p>
-<p>Returns mapping of camera_id -&gt; camera_info:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
-    <span class="mi">0</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;realsense&quot;</span><span class="p">,</span> <span class="s2">&quot;serial&quot;</span><span class="p">:</span> <span class="s2">&quot;...&quot;</span><span class="p">,</span> <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;...&quot;</span><span class="p">},</span>
-    <span class="mi">1</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;realsense&quot;</span><span class="p">,</span> <span class="s2">&quot;serial&quot;</span><span class="p">:</span> <span class="s2">&quot;...&quot;</span><span class="p">,</span> <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;...&quot;</span><span class="p">}</span>
-<span class="p">}</span>
-</pre></div>
-</div>
-<p>Camera 0 = Front/Sagittale (first detected device)
-Camera 1 = Side/Frontale  (second detected device)</p>
+<dt class="sig sig-object py" id="conversion.create_conversion_job">
+<span class="sig-prename descclassname"><span class="pre">conversion.</span></span><span class="sig-name descname"><span class="pre">create_conversion_job</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">batch_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">has_cam1</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">has_cam2</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">force</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../_modules/conversion.html#create_conversion_job"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#conversion.create_conversion_job" title="Link to this definition">¶</a></dt>
+<dd><p>Create and register a new conversion job. Returns job_id.</p>
 </dd></dl>
 
 <dl class="py function">
-<dt class="sig sig-object py" id="config.get_realsense_count">
-<span class="sig-prename descclassname"><span class="pre">config.</span></span><span class="sig-name descname"><span class="pre">get_realsense_count</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span></span></span><a class="reference internal" href="../_modules/config.html#get_realsense_count"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#config.get_realsense_count" title="Link to this definition">¶</a></dt>
-<dd><p>Get the number of detected RealSense cameras.</p>
+<dt class="sig sig-object py" id="conversion.get_all_conversion_jobs">
+<span class="sig-prename descclassname"><span class="pre">conversion.</span></span><span class="sig-name descname"><span class="pre">get_all_conversion_jobs</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span></span></span><a class="reference internal" href="../_modules/conversion.html#get_all_conversion_jobs"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#conversion.get_all_conversion_jobs" title="Link to this definition">¶</a></dt>
+<dd><p>Return all jobs (newest first by created_at).</p>
 </dd></dl>
 
 <dl class="py function">
-<dt class="sig sig-object py" id="config.refresh_camera_detection">
-<span class="sig-prename descclassname"><span class="pre">config.</span></span><span class="sig-name descname"><span class="pre">refresh_camera_detection</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/config.html#refresh_camera_detection"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#config.refresh_camera_detection" title="Link to this definition">¶</a></dt>
-<dd><p>Force re-detection of cameras. Call when cameras may have changed.</p>
+<dt class="sig sig-object py" id="conversion.get_conversion_job">
+<span class="sig-prename descclassname"><span class="pre">conversion.</span></span><span class="sig-name descname"><span class="pre">get_conversion_job</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">job_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/conversion.html#get_conversion_job"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#conversion.get_conversion_job" title="Link to this definition">¶</a></dt>
+<dd><p>Return job dict or None if not found.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="conversion.is_batch_converting">
+<span class="sig-prename descclassname"><span class="pre">conversion.</span></span><span class="sig-name descname"><span class="pre">is_batch_converting</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">batch_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">bool</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/conversion.html#is_batch_converting"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#conversion.is_batch_converting" title="Link to this definition">¶</a></dt>
+<dd><p>Check if a batch is currently being converted. Returns (is_converting, job_id).</p>
 </dd></dl>
 
 </section>
@@ -370,23 +332,23 @@ Camera 1 = Side/Frontale  (second detected device)</p>
       <footer>
         
         <div class="related-pages">
-          <a class="next-page" href="conversion.html">
+          <a class="next-page" href="processing.html">
               <div class="page-info">
                 <div class="context">
                   <span>Next</span>
                 </div>
-                <div class="title">Conversion Pipeline</div>
+                <div class="title">Processing Pipeline (YOLOv8)</div>
               </div>
               <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
             </a>
-          <a class="prev-page" href="camera.html">
+          <a class="prev-page" href="config.html">
               <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
               <div class="page-info">
                 <div class="context">
                   <span>Previous</span>
                 </div>
                 
-                <div class="title">Camera Interface</div>
+                <div class="title">Configuration</div>
                 
               </div>
             </a>
@@ -420,16 +382,17 @@ Camera 1 = Side/Frontale  (second detected device)</p>
         <div class="toc-tree-container">
           <div class="toc-tree">
             <ul>
-<li><a class="reference internal" href="#">Configuration</a><ul>
-<li><a class="reference internal" href="#environment-variables">Environment variables</a></li>
-<li><a class="reference internal" href="#video-settings">Video settings</a></li>
-<li><a class="reference internal" href="#device-detection">Device detection</a></li>
-<li><a class="reference internal" href="#module-config">API reference</a><ul>
-<li><a class="reference internal" href="#config.detect_realsense_devices"><code class="docutils literal notranslate"><span class="pre">detect_realsense_devices()</span></code></a></li>
-<li><a class="reference internal" href="#config.get_camera_type"><code class="docutils literal notranslate"><span class="pre">get_camera_type()</span></code></a></li>
-<li><a class="reference internal" href="#config.get_detected_cameras"><code class="docutils literal notranslate"><span class="pre">get_detected_cameras()</span></code></a></li>
-<li><a class="reference internal" href="#config.get_realsense_count"><code class="docutils literal notranslate"><span class="pre">get_realsense_count()</span></code></a></li>
-<li><a class="reference internal" href="#config.refresh_camera_detection"><code class="docutils literal notranslate"><span class="pre">refresh_camera_detection()</span></code></a></li>
+<li><a class="reference internal" href="#">Conversion Pipeline</a><ul>
+<li><a class="reference internal" href="#how-it-works">How it works</a></li>
+<li><a class="reference internal" href="#safety">Safety</a></li>
+<li><a class="reference internal" href="#module-conversion">API reference</a><ul>
+<li><a class="reference internal" href="#post-recording-bagmp4-conversion-pipeline">Post-recording BAG→MP4 Conversion Pipeline</a></li>
+<li><a class="reference internal" href="#conversion.cancel_conversion_job"><code class="docutils literal notranslate"><span class="pre">cancel_conversion_job()</span></code></a></li>
+<li><a class="reference internal" href="#conversion.convert_bag_to_mp4"><code class="docutils literal notranslate"><span class="pre">convert_bag_to_mp4()</span></code></a></li>
+<li><a class="reference internal" href="#conversion.create_conversion_job"><code class="docutils literal notranslate"><span class="pre">create_conversion_job()</span></code></a></li>
+<li><a class="reference internal" href="#conversion.get_all_conversion_jobs"><code class="docutils literal notranslate"><span class="pre">get_all_conversion_jobs()</span></code></a></li>
+<li><a class="reference internal" href="#conversion.get_conversion_job"><code class="docutils literal notranslate"><span class="pre">get_conversion_job()</span></code></a></li>
+<li><a class="reference internal" href="#conversion.is_batch_converting"><code class="docutils literal notranslate"><span class="pre">is_batch_converting()</span></code></a></li>
 </ul>
 </li>
 </ul>

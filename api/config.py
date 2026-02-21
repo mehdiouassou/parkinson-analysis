@@ -258,10 +258,12 @@ DEFAULT_FRAME_SIZE = (848, 480)
 JPEG_QUALITY = 70  # For streaming preview
 
 # Multi-camera RealSense settings
-# Two D455 cameras on same USB controller need reduced settings
+# Two D455 cameras on USB 3.1 Gen2 Type-A ports (10 Gbps each)
 # D455 supported FPS at 848x480: 5, 15, 30, 60, 90
-# NOTE: 60fps requires USB 3.x; with USB 2.x only 30fps is achievable
+# With dedicated USB 3.1 Gen2 ports per camera, 60fps should be achievable.
+# Falls back to 30fps if USB bandwidth is insufficient.
 REALSENSE_MULTI_CAM_WIDTH = 848
 REALSENSE_MULTI_CAM_HEIGHT = 480
-REALSENSE_MULTI_CAM_FPS = 30  # 30 FPS per camera (60 requires USB 3.x with sufficient bandwidth)
+REALSENSE_MULTI_CAM_FPS = 60   # Target 60fps per camera on USB 3.1 Gen2
+REALSENSE_MULTI_CAM_FPS_FALLBACK = 30  # Fallback if 60fps fails
 REALSENSE_SINGLE_CAM_FPS = 60  # 60 FPS for single camera on USB 3.x

@@ -193,6 +193,7 @@
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../backend/main.html">API: Main Application (FastAPI)</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../backend/processing.html">API: Processing (YOLOv8 &amp; Motion)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/conversion.html">Conversion Pipeline</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../backend/camera.html">API: Camera Interface (RealSense/Bag)</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../backend/config.html">API: Configuration</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../backend/models.html">API: Data Models (Pydantic)</a></li>
@@ -597,65 +598,6 @@
     <span class="k">return</span> <span class="n">_create_mp4_writer_opencv</span><span class="p">(</span><span class="n">filepath</span><span class="p">,</span> <span class="n">frame_size</span><span class="p">,</span> <span class="n">fps</span><span class="p">)</span></div>
 
 
-
-<span class="c1"># =============================================================================</span>
-<span class="c1">#                              WRITER SELECTOR</span>
-<span class="c1"># =============================================================================</span>
-
-<span class="k">class</span><span class="w"> </span><span class="nc">_BagWriterWrapper</span><span class="p">:</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">    Wrapper that provides VideoWriter-like interface for BAG recording.</span>
-<span class="sd">    BAG recording happens automatically via the pipeline.</span>
-<span class="sd">    &quot;&quot;&quot;</span>
-
-    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pipeline</span><span class="p">):</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">pipeline</span> <span class="o">=</span> <span class="n">pipeline</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_opened</span> <span class="o">=</span> <span class="n">pipeline</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
-
-    <span class="k">def</span><span class="w"> </span><span class="nf">isOpened</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_opened</span>
-
-    <span class="k">def</span><span class="w"> </span><span class="nf">write</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">frame</span><span class="p">):</span>
-        <span class="c1"># BAG records automatically from pipeline, no explicit write needed</span>
-        <span class="k">pass</span>
-
-    <span class="k">def</span><span class="w"> </span><span class="nf">release</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">pipeline</span><span class="p">:</span>
-            <span class="n">stop_realsense_recording</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">pipeline</span><span class="p">)</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">pipeline</span> <span class="o">=</span> <span class="kc">None</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">_opened</span> <span class="o">=</span> <span class="kc">False</span>
-
-
-<div class="viewcode-block" id="create_high_quality_writer">
-<a class="viewcode-back" href="../backend/writers.html#writers.create_high_quality_writer">[docs]</a>
-<span class="k">def</span><span class="w"> </span><span class="nf">create_high_quality_writer</span><span class="p">(</span><span class="n">filepath</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">frame_size</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="n">fps</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
-                                <span class="n">camera_type</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">pipeline</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">serial</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">    Create BAG writer for RealSense recording.</span>
-
-<span class="sd">    Only BAG format is supported (no AVI fallback). Returns None writer</span>
-<span class="sd">    on failure so the caller can handle the error gracefully.</span>
-
-<span class="sd">    Args:</span>
-<span class="sd">        filepath: Base output path (extension will be set to .bag automatically)</span>
-<span class="sd">        frame_size: (width, height) tuple</span>
-<span class="sd">        fps: Frames per second</span>
-<span class="sd">        camera_type: Expected to be CAMERA_TYPE_REALSENSE</span>
-<span class="sd">        pipeline: Unused (kept for API compatibility)</span>
-<span class="sd">        serial: RealSense device serial number</span>
-
-<span class="sd">    Returns:</span>
-<span class="sd">        Tuple of (writer, actual_filepath, recording_pipeline)</span>
-<span class="sd">        writer is None if BAG recording failed.</span>
-<span class="sd">    &quot;&quot;&quot;</span>
-    <span class="n">bag_filepath</span> <span class="o">=</span> <span class="n">filepath</span><span class="o">.</span><span class="n">rsplit</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="s1">&#39;.bag&#39;</span>
-
-    <span class="n">rec_pipeline</span><span class="p">,</span> <span class="n">rec_profile</span> <span class="o">=</span> <span class="n">start_realsense_recording</span><span class="p">(</span><span class="n">bag_filepath</span><span class="p">,</span> <span class="n">serial</span><span class="p">)</span>
-    <span class="k">if</span> <span class="n">rec_pipeline</span><span class="p">:</span>
-        <span class="k">return</span> <span class="n">_BagWriterWrapper</span><span class="p">(</span><span class="n">rec_pipeline</span><span class="p">),</span> <span class="n">bag_filepath</span><span class="p">,</span> <span class="n">rec_pipeline</span>
-
-    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Writer] BAG recording failed for </span><span class="si">{</span><span class="n">bag_filepath</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-    <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="n">bag_filepath</span><span class="p">,</span> <span class="kc">None</span></div>
 
 </pre></div>
         </article>

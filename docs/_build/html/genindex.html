@@ -190,12 +190,13 @@
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
   <p class="caption" role="heading"><span class="caption-text">Backend</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="backend/main.html">API: Main Application (FastAPI)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="backend/processing.html">API: Processing (YOLOv8 &amp; Motion)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="backend/camera.html">API: Camera Interface (RealSense/Bag)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="backend/config.html">API: Configuration</a></li>
-<li class="toctree-l1"><a class="reference internal" href="backend/models.html">API: Data Models (Pydantic)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="backend/writers.html">API: Writers (Video &amp; Data)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backend/main.html">Main Application (FastAPI)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backend/camera.html">Camera Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backend/config.html">Configuration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backend/conversion.html">Conversion Pipeline</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backend/processing.html">Processing Pipeline (YOLOv8)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backend/models.html">Data Models (Pydantic)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backend/writers.html">Writers</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">Frontend</span></p>
 <ul>
@@ -266,12 +267,16 @@
     <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="backend/processing.html#processing.BagFileReader">BagFileReader (class in processing)</a>
 </li>
-    </ul></td>
-    <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="backend/writers.html#writers.BagWriter">BagWriter (class in writers)</a>
 </li>
-        <li><a href="backend/models.html#models.ProcessRequest.batch_id">batch_id (models.ProcessRequest attribute)</a>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="backend/models.html#models.ConversionStartRequest.batch_id">batch_id (models.ConversionStartRequest attribute)</a>
+
+        <ul>
+          <li><a href="backend/models.html#models.ProcessRequest.batch_id">(models.ProcessRequest attribute)</a>
 </li>
+        </ul></li>
     </ul></td>
   </tr></table>
 </section>
@@ -297,15 +302,19 @@
 </li>
         <li><a href="frontend/pages.html#CameraFeeds.camerasInfo">CameraFeeds.camerasInfo (CameraFeeds attribute)</a>
 </li>
+        <li><a href="frontend/pages.html#CameraFeeds.handlePause">CameraFeeds.handlePause() (CameraFeeds method)</a>
+</li>
         <li><a href="frontend/pages.html#CameraFeeds.handleRecord">CameraFeeds.handleRecord() (CameraFeeds method)</a>
+</li>
+        <li><a href="frontend/pages.html#CameraFeeds.handleRefresh">CameraFeeds.handleRefresh() (CameraFeeds method)</a>
+</li>
+        <li><a href="frontend/pages.html#CameraFeeds.handleResume">CameraFeeds.handleResume() (CameraFeeds method)</a>
 </li>
         <li><a href="frontend/pages.html#CameraFeeds.handleStop">CameraFeeds.handleStop() (CameraFeeds method)</a>
 </li>
         <li><a href="frontend/pages.html#CameraFeeds.handleSwapCameras">CameraFeeds.handleSwapCameras() (CameraFeeds method)</a>
 </li>
-        <li><a href="frontend/pages.html#CameraFeeds.patientId">CameraFeeds.patientId (CameraFeeds attribute)</a>
-</li>
-        <li><a href="frontend/pages.html#CameraFeeds.patientName">CameraFeeds.patientName (CameraFeeds attribute)</a>
+        <li><a href="frontend/pages.html#CameraFeeds.patientId-patientName">CameraFeeds.patientId / patientName (CameraFeeds attribute)</a>
 </li>
         <li><a href="frontend/pages.html#CameraFeeds.recordingState">CameraFeeds.recordingState (CameraFeeds attribute)</a>
 </li>
@@ -313,25 +322,27 @@
 </li>
         <li><a href="frontend/utils.html#src-config.CameraInfo.camera_id">CameraInfo.camera_id (CameraInfo attribute)</a>
 </li>
-    </ul></td>
-    <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="frontend/utils.html#src-config.CameraInfo.fps">CameraInfo.fps (CameraInfo attribute)</a>
 </li>
         <li><a href="frontend/utils.html#src-config.CameraInfo.frame_size">CameraInfo.frame_size (CameraInfo attribute)</a>
 </li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="frontend/utils.html#src-config.CameraInfo.serial">CameraInfo.serial (CameraInfo attribute)</a>
 </li>
         <li><a href="frontend/utils.html#src-config.CameraInfo.type">CameraInfo.type (CameraInfo attribute)</a>
 </li>
         <li><a href="backend/camera.html#camera.CameraSource">CameraSource (class in camera)</a>
 </li>
+        <li><a href="backend/main.html#main.cancel_conversion">cancel_conversion() (in module main)</a>
+</li>
+        <li><a href="backend/conversion.html#conversion.cancel_conversion_job">cancel_conversion_job() (in module conversion)</a>
+</li>
         <li><a href="backend/processing.html#processing.cancel_job">cancel_job() (in module processing)</a>
 </li>
         <li><a href="backend/main.html#main.cancel_processing">cancel_processing() (in module main)</a>
 </li>
         <li><a href="backend/processing.html#processing.check_job_cancelled">check_job_cancelled() (in module processing)</a>
-</li>
-        <li><a href="backend/camera.html#camera.CameraSource.clear_mp4_writer">clear_mp4_writer() (camera.CameraSource method)</a>
 </li>
         <li>
     config
@@ -340,9 +351,24 @@
           <li><a href="backend/config.html#module-config">module</a>
 </li>
         </ul></li>
+        <li>
+    conversion
+
+        <ul>
+          <li><a href="backend/conversion.html#module-conversion">module</a>
+</li>
+        </ul></li>
+        <li><a href="frontend/pages.html#Conversion">Conversion() (class)</a>
+</li>
+        <li><a href="frontend/pages.html#Conversion.startConversion">Conversion.startConversion() (Conversion method)</a>
+</li>
+        <li><a href="backend/models.html#models.ConversionStartRequest">ConversionStartRequest (class in models)</a>
+</li>
+        <li><a href="backend/conversion.html#conversion.convert_bag_to_mp4">convert_bag_to_mp4() (in module conversion)</a>
+</li>
         <li><a href="backend/writers.html#writers.create_bag_writer">create_bag_writer() (in module writers)</a>
 </li>
-        <li><a href="backend/writers.html#writers.create_high_quality_writer">create_high_quality_writer() (in module writers)</a>
+        <li><a href="backend/conversion.html#conversion.create_conversion_job">create_conversion_job() (in module conversion)</a>
 </li>
         <li><a href="backend/writers.html#writers.create_mp4_writer">create_mp4_writer() (in module writers)</a>
 </li>
@@ -386,6 +412,14 @@
   <h2>E</h2>
   <table style="width: 100%" class="indextable genindextable"><tr>
     <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="frontend/components.html#src-components-ErrorBoundary.ErrorBoundary">ErrorBoundary() (class)</a>
+</li>
+        <li><a href="frontend/components.html#src-components-ErrorBoundary.ErrorBoundary.error">ErrorBoundary.error (ErrorBoundary attribute)</a>
+</li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="frontend/components.html#src-components-ErrorBoundary.ErrorBoundary.hasError">ErrorBoundary.hasError (ErrorBoundary attribute)</a>
+</li>
         <li><a href="backend/processing.html#processing.extract_yolo_landmarks">extract_yolo_landmarks() (in module processing)</a>
 </li>
     </ul></td>
@@ -402,15 +436,13 @@
 </li>
         <li><a href="frontend/pages.html#FileManager.downloadFile">FileManager.downloadFile() (FileManager method)</a>
 </li>
-        <li><a href="frontend/pages.html#FileManager.downloadProgress">FileManager.downloadProgress (FileManager attribute)</a>
-</li>
-        <li><a href="frontend/pages.html#FileManager.files">FileManager.files (FileManager attribute)</a>
+        <li><a href="frontend/pages.html#FileManager.handleDeleteVideoBatch">FileManager.handleDeleteVideoBatch() (FileManager method)</a>
 </li>
     </ul></td>
     <td style="width: 33%; vertical-align: top;"><ul>
-        <li><a href="frontend/pages.html#FileManager.handleDeleteVideoBatch">FileManager.handleDeleteVideoBatch() (FileManager method)</a>
-</li>
         <li><a href="backend/main.html#main.fix_mp4_codec">fix_mp4_codec() (in module main)</a>
+</li>
+        <li><a href="backend/models.html#models.ConversionStartRequest.force">force (models.ConversionStartRequest attribute)</a>
 </li>
         <li><a href="backend/camera.html#camera.CameraSource.fps">fps (camera.CameraSource attribute)</a>
 </li>
@@ -430,6 +462,8 @@
 </li>
         <li><a href="backend/processing.html#processing.BagFileReader.get">get() (processing.BagFileReader method)</a>
 </li>
+        <li><a href="backend/conversion.html#conversion.get_all_conversion_jobs">get_all_conversion_jobs() (in module conversion)</a>
+</li>
         <li><a href="backend/processing.html#processing.get_all_jobs">get_all_jobs() (in module processing)</a>
 </li>
         <li><a href="backend/camera.html#camera.get_camera_source">get_camera_source() (in module camera)</a>
@@ -440,17 +474,19 @@
 </li>
         <li><a href="backend/main.html#main.get_cameras_swap_state">get_cameras_swap_state() (in module main)</a>
 </li>
+        <li><a href="backend/conversion.html#conversion.get_conversion_job">get_conversion_job() (in module conversion)</a>
+</li>
+        <li><a href="backend/main.html#main.get_conversion_status">get_conversion_status() (in module main)</a>
+</li>
         <li><a href="backend/config.html#config.get_detected_cameras">get_detected_cameras() (in module config)</a>
 </li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="backend/main.html#main.get_frame_comparison">get_frame_comparison() (in module main)</a>
 </li>
         <li><a href="backend/camera.html#camera.CameraSource.get_info">get_info() (camera.CameraSource method)</a>
 </li>
-    </ul></td>
-    <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="backend/processing.html#processing.get_job">get_job() (in module processing)</a>
-</li>
-        <li><a href="backend/camera.html#camera.CameraSource.get_mp4_frame_count">get_mp4_frame_count() (camera.CameraSource method)</a>
 </li>
         <li><a href="backend/main.html#main.get_physical_camera_id">get_physical_camera_id() (in module main)</a>
 </li>
@@ -488,14 +524,16 @@
     <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="backend/models.html#models.ActionLog.id">id (models.ActionLog attribute)</a>
 </li>
+        <li><a href="backend/conversion.html#conversion.is_batch_converting">is_batch_converting() (in module conversion)</a>
+</li>
         <li><a href="backend/processing.html#processing.is_batch_processing">is_batch_processing() (in module processing)</a>
 </li>
         <li><a href="backend/camera.html#camera.CameraSource.is_realsense">is_realsense() (camera.CameraSource method)</a>
 </li>
-        <li><a href="backend/camera.html#camera.CameraSource.is_recording">is_recording() (camera.CameraSource method)</a>
-</li>
     </ul></td>
     <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="backend/camera.html#camera.CameraSource.is_recording">is_recording() (camera.CameraSource method)</a>
+</li>
         <li><a href="backend/camera.html#camera.CameraSource.is_running">is_running() (camera.CameraSource method)</a>
 </li>
         <li><a href="backend/processing.html#processing.BagFileReader.isOpened">isOpened() (processing.BagFileReader method)</a>
@@ -522,6 +560,8 @@
 </li>
     </ul></td>
     <td style="width: 33%; vertical-align: top;"><ul>
+        <li><a href="backend/main.html#main.list_conversion_jobs">list_conversion_jobs() (in module main)</a>
+</li>
         <li><a href="backend/main.html#main.list_processing_jobs">list_processing_jobs() (in module main)</a>
 </li>
         <li><a href="backend/main.html#main.list_recordings">list_recordings() (in module main)</a>
@@ -560,6 +600,8 @@
 </li>
           <li><a href="backend/config.html#module-config">config</a>
 </li>
+          <li><a href="backend/conversion.html#module-conversion">conversion</a>
+</li>
           <li><a href="backend/main.html#module-main">main</a>
 </li>
           <li><a href="backend/models.html#module-models">models</a>
@@ -581,11 +623,11 @@
 </li>
         <li><a href="backend/models.html#models.RecordingStartRequest.patientName">patientName (models.RecordingStartRequest attribute)</a>
 </li>
-        <li><a href="backend/camera.html#camera.CameraSource.pause_mp4_writer">pause_mp4_writer() (camera.CameraSource method)</a>
-</li>
-        <li><a href="backend/main.html#main.pause_recording">pause_recording() (in module main)</a>
+        <li><a href="backend/camera.html#camera.CameraSource.pause_recording">pause_recording() (camera.CameraSource method)</a>
 
         <ul>
+          <li><a href="backend/main.html#main.pause_recording">(in module main)</a>
+</li>
           <li><a href="backend/writers.html#writers.BagWriter.pause_recording">(writers.BagWriter method)</a>
 </li>
         </ul></li>
@@ -598,15 +640,9 @@
           <li><a href="backend/processing.html#module-processing">module</a>
 </li>
         </ul></li>
-        <li><a href="frontend/pages.html#Processing">Processing() (class)</a>
-</li>
     </ul></td>
     <td style="width: 33%; vertical-align: top;"><ul>
-        <li><a href="frontend/pages.html#Processing.batches">Processing.batches (Processing attribute)</a>
-</li>
-        <li><a href="frontend/pages.html#Processing.currentJob">Processing.currentJob (Processing attribute)</a>
-</li>
-        <li><a href="frontend/pages.html#Processing.pollJobStatus">Processing.pollJobStatus() (Processing method)</a>
+        <li><a href="frontend/pages.html#Processing">Processing() (class)</a>
 </li>
         <li><a href="frontend/pages.html#Processing.startProcessing">Processing.startProcessing() (Processing method)</a>
 </li>
@@ -654,10 +690,12 @@
           <li><a href="backend/writers.html#writers.FFmpegWriter.release">(writers.FFmpegWriter method)</a>
 </li>
         </ul></li>
-        <li><a href="backend/camera.html#camera.CameraSource.resume_mp4_writer">resume_mp4_writer() (camera.CameraSource method)</a>
+        <li><a href="backend/camera.html#camera.CameraSource.resume_recording">resume_recording() (camera.CameraSource method)</a>
+
+        <ul>
+          <li><a href="backend/main.html#main.resume_recording">(in module main)</a>
 </li>
-        <li><a href="backend/main.html#main.resume_recording">resume_recording() (in module main)</a>
-</li>
+        </ul></li>
     </ul></td>
   </tr></table>
 </section>
@@ -670,11 +708,11 @@
 </li>
         <li><a href="backend/models.html#models.SaveTaggingRequest">SaveTaggingRequest (class in models)</a>
 </li>
-        <li><a href="backend/camera.html#camera.CameraSource.set_mp4_writer">set_mp4_writer() (camera.CameraSource method)</a>
-</li>
         <li><a href="backend/main.html#main.shutdown">shutdown() (in module main)</a>
 </li>
         <li><a href="backend/camera.html#camera.shutdown_all_cameras">shutdown_all_cameras() (in module camera)</a>
+</li>
+        <li><a href="frontend/components.html#module-src-components-ErrorBoundary">src/components/ErrorBoundary (module)</a>
 </li>
         <li><a href="frontend/components.html#module-src-components-Layout">src/components/Layout (module)</a>
 </li>
@@ -683,6 +721,8 @@
         <li><a href="frontend/utils.html#module-src-config">src/config (module)</a>
 </li>
         <li><a href="backend/camera.html#camera.CameraSource.start">start() (camera.CameraSource method)</a>
+</li>
+        <li><a href="backend/main.html#main.start_conversion">start_conversion() (in module main)</a>
 </li>
     </ul></td>
     <td style="width: 33%; vertical-align: top;"><ul>
@@ -724,29 +764,13 @@
 </li>
         <li><a href="frontend/pages.html#Tagging.addActionLog">Tagging.addActionLog() (Tagging method)</a>
 </li>
-        <li><a href="frontend/pages.html#Tagging.copyToClipboard">Tagging.copyToClipboard() (Tagging method)</a>
-</li>
         <li><a href="frontend/pages.html#Tagging.detectCameraType">Tagging.detectCameraType() (Tagging method)</a>
-</li>
-        <li><a href="frontend/pages.html#Tagging.handleClear">Tagging.handleClear() (Tagging method)</a>
-</li>
-        <li><a href="frontend/pages.html#Tagging.handleDeleteLog">Tagging.handleDeleteLog() (Tagging method)</a>
-</li>
-        <li><a href="frontend/pages.html#Tagging.handleFileSelect">Tagging.handleFileSelect() (Tagging method)</a>
 </li>
         <li><a href="frontend/pages.html#Tagging.handleSave">Tagging.handleSave() (Tagging method)</a>
 </li>
     </ul></td>
     <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="frontend/pages.html#Tagging.hasUnsavedChanges">Tagging.hasUnsavedChanges (Tagging attribute)</a>
-</li>
-        <li><a href="frontend/pages.html#Tagging.isVideoLoading">Tagging.isVideoLoading (Tagging attribute)</a>
-</li>
-        <li><a href="frontend/pages.html#Tagging.playbackRate">Tagging.playbackRate (Tagging attribute)</a>
-</li>
-        <li><a href="frontend/pages.html#Tagging.selectedVideo">Tagging.selectedVideo (Tagging attribute)</a>
-</li>
-        <li><a href="frontend/pages.html#Tagging.videoFiles">Tagging.videoFiles (Tagging attribute)</a>
 </li>
         <li><a href="frontend/pages.html#Tagging.videoFps">Tagging.videoFps (Tagging attribute)</a>
 </li>

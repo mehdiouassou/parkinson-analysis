@@ -191,12 +191,13 @@
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
   <p class="caption" role="heading"><span class="caption-text">Backend</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="../backend/main.html">API: Main Application (FastAPI)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/processing.html">API: Processing (YOLOv8 &amp; Motion)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/camera.html">API: Camera Interface (RealSense/Bag)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/config.html">API: Configuration</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/models.html">API: Data Models (Pydantic)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/writers.html">API: Writers (Video &amp; Data)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/main.html">Main Application (FastAPI)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/camera.html">Camera Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/config.html">Configuration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/conversion.html">Conversion Pipeline</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/processing.html">Processing Pipeline (YOLOv8)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/models.html">Data Models (Pydantic)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/writers.html">Writers</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">Frontend</span></p>
 <ul>
@@ -271,6 +272,7 @@
     <span class="n">REALSENSE_MULTI_CAM_WIDTH</span><span class="p">,</span>
     <span class="n">REALSENSE_MULTI_CAM_HEIGHT</span><span class="p">,</span>
     <span class="n">REALSENSE_MULTI_CAM_FPS</span><span class="p">,</span>
+    <span class="n">REALSENSE_MULTI_CAM_FPS_FALLBACK</span><span class="p">,</span>
     <span class="n">REALSENSE_SINGLE_CAM_FPS</span><span class="p">,</span>
 <span class="p">)</span>
 
@@ -313,12 +315,6 @@
         <span class="bp">self</span><span class="o">.</span><span class="n">_last_frame_time</span> <span class="o">=</span> <span class="mi">0</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_stop_event</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Event</span><span class="p">()</span>
 
-        <span class="c1"># MP4 recording (decoupled from streaming)</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_writer</span> <span class="o">=</span> <span class="kc">None</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_paused</span> <span class="o">=</span> <span class="kc">False</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_lock</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_frame_count</span> <span class="o">=</span> <span class="mi">0</span>
-
         <span class="c1"># Determine camera type based on mode and detection</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">camera_type</span> <span class="o">=</span> <span class="n">get_camera_type</span><span class="p">(</span><span class="n">camera_id</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">realsense_serial</span> <span class="o">=</span> <span class="kc">None</span>
@@ -349,6 +345,14 @@
                 <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Camera </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">camera_id</span><span class="si">}</span><span class="s2">] RealSense not available, cannot start&quot;</span><span class="p">)</span>
                 <span class="k">return</span> <span class="kc">False</span>
 
+            <span class="c1"># CRITICAL OPTIMIZATION:</span>
+            <span class="c1"># Do not attempt to start if the camera was not detected.</span>
+            <span class="c1"># This prevents 30s timeouts on startup when no cameras are connected.</span>
+            <span class="n">detected</span> <span class="o">=</span> <span class="n">get_detected_cameras</span><span class="p">()</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">camera_type</span> <span class="o">==</span> <span class="n">CAMERA_TYPE_REALSENSE</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">camera_id</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">detected</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Camera </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">camera_id</span><span class="si">}</span><span class="s2">] Not detected in system, skipping startup.&quot;</span><span class="p">)</span>
+                <span class="k">return</span> <span class="kc">False</span>
+
             <span class="n">success</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_start_realsense</span><span class="p">(</span><span class="n">bag_path</span><span class="p">)</span>
             <span class="k">if</span> <span class="n">success</span><span class="p">:</span>
                 <span class="bp">self</span><span class="o">.</span><span class="n">_stop_event</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
@@ -361,10 +365,11 @@
 <a class="viewcode-back" href="../backend/camera.html#camera.CameraSource.stop">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">stop</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Stop the camera source and release resources.&quot;&quot;&quot;</span>
-        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_lock</span><span class="p">:</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">_running</span> <span class="o">=</span> <span class="kc">False</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">_stop_event</span><span class="o">.</span><span class="n">set</span><span class="p">()</span>
-            
+        <span class="c1"># Signal stop event immediately (before acquiring lock) so that</span>
+        <span class="c1"># any running start() loop can detect it and abort early.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_stop_event</span><span class="o">.</span><span class="n">set</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_running</span> <span class="o">=</span> <span class="kc">False</span>
+
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_capture_thread</span><span class="p">:</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_capture_thread</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="mf">2.0</span><span class="p">)</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_capture_thread</span> <span class="o">=</span> <span class="kc">None</span>
@@ -447,6 +452,56 @@
         <span class="k">return</span> <span class="n">success</span></div>
 
 
+<div class="viewcode-block" id="CameraSource.pause_recording">
+<a class="viewcode-back" href="../backend/camera.html#camera.CameraSource.pause_recording">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">pause_recording</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Pause BAG recording using the RealSense recorder device.</span>
+
+<span class="sd">        The pipeline stays running (capture thread continues) but frames</span>
+<span class="sd">        are no longer written to the BAG file. Call resume_recording() to</span>
+<span class="sd">        continue writing.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            True if pause was successful</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_recording</span> <span class="ow">or</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">pipeline</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">False</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">device</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pipeline</span><span class="o">.</span><span class="n">get_active_profile</span><span class="p">()</span><span class="o">.</span><span class="n">get_device</span><span class="p">()</span>
+            <span class="n">recorder</span> <span class="o">=</span> <span class="n">device</span><span class="o">.</span><span class="n">as_recorder</span><span class="p">()</span>
+            <span class="n">recorder</span><span class="o">.</span><span class="n">pause</span><span class="p">()</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Camera </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">camera_id</span><span class="si">}</span><span class="s2">] BAG recording paused&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">True</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Camera </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">camera_id</span><span class="si">}</span><span class="s2">] Failed to pause recording: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">False</span></div>
+
+
+<div class="viewcode-block" id="CameraSource.resume_recording">
+<a class="viewcode-back" href="../backend/camera.html#camera.CameraSource.resume_recording">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">resume_recording</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Resume a paused BAG recording.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            True if resume was successful</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_recording</span> <span class="ow">or</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">pipeline</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">False</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">device</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pipeline</span><span class="o">.</span><span class="n">get_active_profile</span><span class="p">()</span><span class="o">.</span><span class="n">get_device</span><span class="p">()</span>
+            <span class="n">recorder</span> <span class="o">=</span> <span class="n">device</span><span class="o">.</span><span class="n">as_recorder</span><span class="p">()</span>
+            <span class="n">recorder</span><span class="o">.</span><span class="n">resume</span><span class="p">()</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Camera </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">camera_id</span><span class="si">}</span><span class="s2">] BAG recording resumed&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">True</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Camera </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">camera_id</span><span class="si">}</span><span class="s2">] Failed to resume recording: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">False</span></div>
+
+
 <div class="viewcode-block" id="CameraSource.stop_recording">
 <a class="viewcode-back" href="../backend/camera.html#camera.CameraSource.stop_recording">[docs]</a>
     <span class="k">def</span><span class="w"> </span><span class="nf">stop_recording</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
@@ -505,7 +560,8 @@
         <span class="c1"># For multi-camera setups, stagger startup to avoid USB conflicts</span>
         <span class="n">num_cameras</span> <span class="o">=</span> <span class="n">get_realsense_count</span><span class="p">()</span>
         <span class="k">if</span> <span class="n">num_cameras</span> <span class="o">&gt;=</span> <span class="mi">2</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">camera_id</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
-            <span class="n">delay</span> <span class="o">=</span> <span class="mf">0.5</span> <span class="k">if</span> <span class="n">quick_restart</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">camera_id</span> <span class="o">*</span> <span class="mf">2.0</span>
+            <span class="c1"># reduced delay</span>
+            <span class="n">delay</span> <span class="o">=</span> <span class="mf">0.5</span>
             <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Camera </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">camera_id</span><span class="si">}</span><span class="s2">] Waiting </span><span class="si">{</span><span class="n">delay</span><span class="si">}</span><span class="s2">s for staggered startup...&quot;</span><span class="p">)</span>
             <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">delay</span><span class="p">)</span>
 
@@ -513,22 +569,24 @@
         <span class="n">is_bag_mode</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">camera_type</span> <span class="o">==</span> <span class="n">CAMERA_TYPE_BAG_FILE</span> <span class="ow">and</span> <span class="n">actual_bag_path</span> <span class="ow">and</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">actual_bag_path</span><span class="p">)</span>
 
         <span class="k">if</span> <span class="n">num_cameras</span> <span class="o">&gt;=</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="c1"># Two D455 cameras on USB 3.1 Gen2 — try 60fps first, fallback to 30</span>
             <span class="n">configs_to_try</span> <span class="o">=</span> <span class="p">[</span>
-                <span class="p">(</span><span class="mi">848</span><span class="p">,</span> <span class="mi">480</span><span class="p">,</span> <span class="mi">60</span><span class="p">),</span>
-                <span class="p">(</span><span class="mi">848</span><span class="p">,</span> <span class="mi">480</span><span class="p">,</span> <span class="mi">30</span><span class="p">),</span>
-                <span class="p">(</span><span class="mi">848</span><span class="p">,</span> <span class="mi">480</span><span class="p">,</span> <span class="mi">15</span><span class="p">),</span>
-                <span class="p">(</span><span class="mi">848</span><span class="p">,</span> <span class="mi">480</span><span class="p">,</span> <span class="mi">5</span><span class="p">),</span>
-                <span class="p">(</span><span class="mi">848</span><span class="p">,</span> <span class="mi">240</span><span class="p">,</span> <span class="mi">60</span><span class="p">),</span>
-                <span class="p">(</span><span class="mi">848</span><span class="p">,</span> <span class="mi">240</span><span class="p">,</span> <span class="mi">30</span><span class="p">),</span>
+                <span class="p">(</span><span class="n">REALSENSE_MULTI_CAM_WIDTH</span><span class="p">,</span> <span class="n">REALSENSE_MULTI_CAM_HEIGHT</span><span class="p">,</span> <span class="n">REALSENSE_MULTI_CAM_FPS</span><span class="p">),</span>
+                <span class="p">(</span><span class="n">REALSENSE_MULTI_CAM_WIDTH</span><span class="p">,</span> <span class="n">REALSENSE_MULTI_CAM_HEIGHT</span><span class="p">,</span> <span class="n">REALSENSE_MULTI_CAM_FPS_FALLBACK</span><span class="p">),</span>
             <span class="p">]</span>
         <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># Single camera can use full USB 3.x bandwidth</span>
             <span class="n">configs_to_try</span> <span class="o">=</span> <span class="p">[</span>
-                <span class="p">(</span><span class="mi">848</span><span class="p">,</span> <span class="mi">480</span><span class="p">,</span> <span class="mi">60</span><span class="p">),</span>
-                <span class="p">(</span><span class="mi">848</span><span class="p">,</span> <span class="mi">480</span><span class="p">,</span> <span class="mi">30</span><span class="p">),</span>
-                <span class="p">(</span><span class="mi">848</span><span class="p">,</span> <span class="mi">480</span><span class="p">,</span> <span class="mi">15</span><span class="p">),</span>
+                <span class="p">(</span><span class="n">REALSENSE_MULTI_CAM_WIDTH</span><span class="p">,</span> <span class="n">REALSENSE_MULTI_CAM_HEIGHT</span><span class="p">,</span> <span class="n">REALSENSE_SINGLE_CAM_FPS</span><span class="p">),</span>
+                <span class="p">(</span><span class="n">REALSENSE_MULTI_CAM_WIDTH</span><span class="p">,</span> <span class="n">REALSENSE_MULTI_CAM_HEIGHT</span><span class="p">,</span> <span class="n">REALSENSE_MULTI_CAM_FPS</span><span class="p">),</span>
             <span class="p">]</span>
 
         <span class="k">for</span> <span class="n">width</span><span class="p">,</span> <span class="n">height</span><span class="p">,</span> <span class="n">fps</span> <span class="ow">in</span> <span class="n">configs_to_try</span><span class="p">:</span>
+            <span class="c1"># Check for stop signal between attempts</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_stop_event</span><span class="o">.</span><span class="n">is_set</span><span class="p">():</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Camera </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">camera_id</span><span class="si">}</span><span class="s2">] Startup aborted by stop signal&quot;</span><span class="p">)</span>
+                <span class="k">break</span>
+            
             <span class="k">try</span><span class="p">:</span>
                 <span class="bp">self</span><span class="o">.</span><span class="n">pipeline</span> <span class="o">=</span> <span class="n">rs</span><span class="o">.</span><span class="n">pipeline</span><span class="p">()</span>
                 <span class="n">config</span> <span class="o">=</span> <span class="n">rs</span><span class="o">.</span><span class="n">config</span><span class="p">()</span>
@@ -563,8 +621,9 @@
 
                 <span class="n">profile</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pipeline</span><span class="o">.</span><span class="n">start</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
 
-                <span class="n">stabilize_time</span> <span class="o">=</span> <span class="mf">0.2</span> <span class="k">if</span> <span class="n">quick_restart</span> <span class="k">else</span> <span class="mf">1.0</span>
-                <span class="n">stabilize_frames</span> <span class="o">=</span> <span class="mi">3</span> <span class="k">if</span> <span class="n">quick_restart</span> <span class="k">else</span> <span class="mi">10</span>
+                <span class="c1"># Reduce stabilization time</span>
+                <span class="n">stabilize_time</span> <span class="o">=</span> <span class="mf">0.2</span>
+                <span class="n">stabilize_frames</span> <span class="o">=</span> <span class="mi">2</span>
                 <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Camera </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">camera_id</span><span class="si">}</span><span class="s2">] Waiting for sensor to stabilize...&quot;</span><span class="p">)</span>
                 <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">stabilize_time</span><span class="p">)</span>
 
@@ -631,15 +690,6 @@
                     <span class="bp">self</span><span class="o">.</span><span class="n">_latest_frame</span> <span class="o">=</span> <span class="n">frame_data</span>
                     <span class="bp">self</span><span class="o">.</span><span class="n">_latest_depth</span> <span class="o">=</span> <span class="n">depth_data</span>
                     <span class="bp">self</span><span class="o">.</span><span class="n">_last_frame_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
-
-                <span class="c1"># Write to MP4 if recording (decoupled from streaming)</span>
-                <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_lock</span><span class="p">:</span>
-                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_writer</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_paused</span><span class="p">:</span>
-                        <span class="k">try</span><span class="p">:</span>
-                            <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_writer</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">frame_data</span><span class="p">)</span>
-                            <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_frame_count</span> <span class="o">+=</span> <span class="mi">1</span>
-                        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
-                            <span class="k">pass</span>
 
                 <span class="n">error_count</span> <span class="o">=</span> <span class="mi">0</span>
 
@@ -716,57 +766,9 @@
             <span class="s2">&quot;fps&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">fps</span><span class="p">,</span>
             <span class="s2">&quot;running&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_running</span><span class="p">,</span>
         <span class="p">}</span></div>
-
-
-
-    <span class="c1"># -------------------------------------------------------------------------</span>
-    <span class="c1">#                        MP4 WRITER (DECOUPLED)</span>
-    <span class="c1"># -------------------------------------------------------------------------</span>
-
-<div class="viewcode-block" id="CameraSource.set_mp4_writer">
-<a class="viewcode-back" href="../backend/camera.html#camera.CameraSource.set_mp4_writer">[docs]</a>
-    <span class="k">def</span><span class="w"> </span><span class="nf">set_mp4_writer</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">writer</span><span class="p">):</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Attach an MP4 writer to the capture loop for decoupled recording.&quot;&quot;&quot;</span>
-        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_lock</span><span class="p">:</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_writer</span> <span class="o">=</span> <span class="n">writer</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_paused</span> <span class="o">=</span> <span class="kc">False</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_frame_count</span> <span class="o">=</span> <span class="mi">0</span></div>
-
-
-<div class="viewcode-block" id="CameraSource.clear_mp4_writer">
-<a class="viewcode-back" href="../backend/camera.html#camera.CameraSource.clear_mp4_writer">[docs]</a>
-    <span class="k">def</span><span class="w"> </span><span class="nf">clear_mp4_writer</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Detach MP4 writer and return total frames written.&quot;&quot;&quot;</span>
-        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_lock</span><span class="p">:</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_writer</span> <span class="o">=</span> <span class="kc">None</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_paused</span> <span class="o">=</span> <span class="kc">False</span>
-            <span class="n">count</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_frame_count</span>
-            <span class="k">return</span> <span class="n">count</span></div>
-
-
-<div class="viewcode-block" id="CameraSource.pause_mp4_writer">
-<a class="viewcode-back" href="../backend/camera.html#camera.CameraSource.pause_mp4_writer">[docs]</a>
-    <span class="k">def</span><span class="w"> </span><span class="nf">pause_mp4_writer</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Pause MP4 frame writing (for recording pause).&quot;&quot;&quot;</span>
-        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_lock</span><span class="p">:</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_paused</span> <span class="o">=</span> <span class="kc">True</span></div>
-
-
-<div class="viewcode-block" id="CameraSource.resume_mp4_writer">
-<a class="viewcode-back" href="../backend/camera.html#camera.CameraSource.resume_mp4_writer">[docs]</a>
-    <span class="k">def</span><span class="w"> </span><span class="nf">resume_mp4_writer</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Resume MP4 frame writing (for recording resume).&quot;&quot;&quot;</span>
-        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_lock</span><span class="p">:</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_paused</span> <span class="o">=</span> <span class="kc">False</span></div>
-
-
-<div class="viewcode-block" id="CameraSource.get_mp4_frame_count">
-<a class="viewcode-back" href="../backend/camera.html#camera.CameraSource.get_mp4_frame_count">[docs]</a>
-    <span class="k">def</span><span class="w"> </span><span class="nf">get_mp4_frame_count</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get number of frames written to MP4 so far.&quot;&quot;&quot;</span>
-        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_lock</span><span class="p">:</span>
-            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mp4_frame_count</span></div>
 </div>
+
+
 
 
 
@@ -781,11 +783,20 @@
 <div class="viewcode-block" id="get_camera_source">
 <a class="viewcode-back" href="../backend/camera.html#camera.get_camera_source">[docs]</a>
 <span class="k">def</span><span class="w"> </span><span class="nf">get_camera_source</span><span class="p">(</span><span class="n">camera_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">CameraSource</span><span class="p">:</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get or create camera source for given ID.&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Get or create camera source for given ID.</span>
+
+<span class="sd">    Camera startup is launched in a background thread so this function</span>
+<span class="sd">    returns immediately without blocking the calling request. Callers</span>
+<span class="sd">    must check ``camera.is_running()`` before using the source.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">with</span> <span class="n">camera_sources_lock</span><span class="p">:</span>
         <span class="k">if</span> <span class="n">camera_id</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">camera_sources</span><span class="p">:</span>
-            <span class="n">camera_sources</span><span class="p">[</span><span class="n">camera_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">CameraSource</span><span class="p">(</span><span class="n">camera_id</span><span class="p">)</span>
-            <span class="n">camera_sources</span><span class="p">[</span><span class="n">camera_id</span><span class="p">]</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+            <span class="n">camera</span> <span class="o">=</span> <span class="n">CameraSource</span><span class="p">(</span><span class="n">camera_id</span><span class="p">)</span>
+            <span class="n">camera_sources</span><span class="p">[</span><span class="n">camera_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">camera</span>
+            <span class="c1"># Start in background — do NOT block inside the lock</span>
+            <span class="n">t</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">camera</span><span class="o">.</span><span class="n">start</span><span class="p">,</span> <span class="n">daemon</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="n">t</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
         <span class="k">return</span> <span class="n">camera_sources</span><span class="p">[</span><span class="n">camera_id</span><span class="p">]</span></div>
 
 
@@ -795,10 +806,19 @@
 <span class="k">def</span><span class="w"> </span><span class="nf">shutdown_all_cameras</span><span class="p">():</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Release all camera resources. Called on app shutdown.&quot;&quot;&quot;</span>
     <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[Camera] Releasing all camera resources...&quot;</span><span class="p">)</span>
+    
+    <span class="c1"># Get references under lock, but execute stop() outside lock</span>
+    <span class="n">cameras_to_stop</span> <span class="o">=</span> <span class="p">[]</span>
     <span class="k">with</span> <span class="n">camera_sources_lock</span><span class="p">:</span>
-        <span class="k">for</span> <span class="n">cam_id</span><span class="p">,</span> <span class="n">camera</span> <span class="ow">in</span> <span class="n">camera_sources</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-            <span class="n">camera</span><span class="o">.</span><span class="n">stop</span><span class="p">()</span>
+        <span class="n">cameras_to_stop</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">camera_sources</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
         <span class="n">camera_sources</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+        
+    <span class="k">for</span> <span class="n">camera</span> <span class="ow">in</span> <span class="n">cameras_to_stop</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">camera</span><span class="o">.</span><span class="n">stop</span><span class="p">()</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Camera] Error stopping camera </span><span class="si">{</span><span class="n">camera</span><span class="o">.</span><span class="n">camera_id</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            
     <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[Camera] All cameras released&quot;</span><span class="p">)</span></div>
 
 </pre></div>

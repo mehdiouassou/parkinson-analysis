@@ -192,12 +192,13 @@
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
   <p class="caption" role="heading"><span class="caption-text">Backend</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="../backend/main.html">API: Main Application (FastAPI)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/processing.html">API: Processing (YOLOv8 &amp; Motion)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/camera.html">API: Camera Interface (RealSense/Bag)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/config.html">API: Configuration</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/models.html">API: Data Models (Pydantic)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/writers.html">API: Writers (Video &amp; Data)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/main.html">Main Application (FastAPI)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/camera.html">Camera Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/config.html">Configuration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/conversion.html">Conversion Pipeline</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/processing.html">Processing Pipeline (YOLOv8)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/models.html">Data Models (Pydantic)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/writers.html">Writers</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">Frontend</span></p>
 <ul class="current">
@@ -303,6 +304,29 @@
 </dd></dl>
 
 </section>
+<section id="module-src-components-ErrorBoundary">
+<span id="errorboundary"></span><h2>ErrorBoundary<a class="headerlink" href="#module-src-components-ErrorBoundary" title="Link to this heading">¶</a></h2>
+<dl class="js class">
+<dt class="sig sig-object js" id="src-components-ErrorBoundary.ErrorBoundary">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="n"><span class="pre">src/components/ErrorBoundary</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">ErrorBoundary</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#src-components-ErrorBoundary.ErrorBoundary" title="Link to this definition">¶</a></dt>
+<dd><p>React component that catches JavaScript errors anywhere in their child component tree,
+logs those errors, and displays a fallback UI instead of the component tree that crashed.</p>
+<p><strong>State</strong></p>
+<dl class="js attribute">
+<dt class="sig sig-object js" id="src-components-ErrorBoundary.ErrorBoundary.hasError">
+<span class="sig-prename descclassname"><span class="n"><span class="pre">ErrorBoundary</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">hasError</span></span></span><a class="headerlink" href="#src-components-ErrorBoundary.ErrorBoundary.hasError" title="Link to this definition">¶</a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">boolean</span></code> — True if an error has been caught.</p>
+</dd></dl>
+
+<dl class="js attribute">
+<dt class="sig sig-object js" id="src-components-ErrorBoundary.ErrorBoundary.error">
+<span class="sig-prename descclassname"><span class="n"><span class="pre">ErrorBoundary</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">error</span></span></span><a class="headerlink" href="#src-components-ErrorBoundary.ErrorBoundary.error" title="Link to this definition">¶</a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">Error</span> <span class="pre">|</span> <span class="pre">null</span></code> — The error object.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
 </section>
 
         </article>
@@ -372,6 +396,14 @@
 </li>
 <li><a class="reference internal" href="#module-src-components-Layout">Layout</a><ul>
 <li><a class="reference internal" href="#src-components-Layout.Layout"><code class="docutils literal notranslate"><span class="pre">Layout()</span></code></a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#module-src-components-ErrorBoundary">ErrorBoundary</a><ul>
+<li><a class="reference internal" href="#src-components-ErrorBoundary.ErrorBoundary"><code class="docutils literal notranslate"><span class="pre">ErrorBoundary</span></code></a><ul>
+<li><a class="reference internal" href="#src-components-ErrorBoundary.ErrorBoundary.hasError"><code class="docutils literal notranslate"><span class="pre">ErrorBoundary.hasError</span></code></a></li>
+<li><a class="reference internal" href="#src-components-ErrorBoundary.ErrorBoundary.error"><code class="docutils literal notranslate"><span class="pre">ErrorBoundary.error</span></code></a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

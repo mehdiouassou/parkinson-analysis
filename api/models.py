@@ -41,3 +41,13 @@ class RecordingStartRequest(BaseModel):
     """Request to start a new recording session."""
     patientName: str = ""
     patientId: str = ""
+
+
+# =============================================================================
+#                           CONVERSION MODELS
+# =============================================================================
+
+class ConversionStartRequest(BaseModel):
+    """Request to start BAG→MP4 conversion for a batch."""
+    batch_id: str
+    force: bool = False  # Re-convert even if MP4 already exists

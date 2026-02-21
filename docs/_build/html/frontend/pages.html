@@ -192,12 +192,13 @@
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
   <p class="caption" role="heading"><span class="caption-text">Backend</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="../backend/main.html">API: Main Application (FastAPI)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/processing.html">API: Processing (YOLOv8 &amp; Motion)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/camera.html">API: Camera Interface (RealSense/Bag)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/config.html">API: Configuration</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/models.html">API: Data Models (Pydantic)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/writers.html">API: Writers (Video &amp; Data)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/main.html">Main Application (FastAPI)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/camera.html">Camera Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/config.html">Configuration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/conversion.html">Conversion Pipeline</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/processing.html">Processing Pipeline (YOLOv8)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/models.html">Data Models (Pydantic)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/writers.html">Writers</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">Frontend</span></p>
 <ul class="current">
@@ -263,44 +264,65 @@ Located in <code class="docutils literal notranslate"><span class="pre">src/page
 <dl class="js attribute">
 <dt class="sig sig-object js" id="CameraFeeds.camerasInfo">
 <span class="sig-prename descclassname"><span class="n"><span class="pre">CameraFeeds</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">camerasInfo</span></span></span><a class="headerlink" href="#CameraFeeds.camerasInfo" title="Link to this definition">¶</a></dt>
-<dd><p><code class="docutils literal notranslate"><span class="pre">CameraInfo[]</span></code> — Detected RealSense cameras, fetched from <code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/cameras/info</span></code>.</p>
+<dd><p><code class="docutils literal notranslate"><span class="pre">CameraInfo[]</span></code> — detected RealSense cameras from <code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/cameras/info</span></code>.</p>
 </dd></dl>
 
 <dl class="js attribute">
-<dt class="sig sig-object js" id="CameraFeeds.patientId">
-<span class="sig-prename descclassname"><span class="n"><span class="pre">CameraFeeds</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">patientId</span></span></span><a class="headerlink" href="#CameraFeeds.patientId" title="Link to this definition">¶</a></dt>
-<dd><p><code class="docutils literal notranslate"><span class="pre">string</span></code></p>
-</dd></dl>
-
-<dl class="js attribute">
-<dt class="sig sig-object js" id="CameraFeeds.patientName">
-<span class="sig-prename descclassname"><span class="n"><span class="pre">CameraFeeds</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">patientName</span></span></span><a class="headerlink" href="#CameraFeeds.patientName" title="Link to this definition">¶</a></dt>
-<dd><p><code class="docutils literal notranslate"><span class="pre">string</span></code></p>
+<dt class="sig sig-object js" id="CameraFeeds.patientId-patientName">
+<span class="sig-prename descclassname"><span class="n"><span class="pre">CameraFeeds</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">patientId</span> <span class="pre">/</span> <span class="pre">patientName</span></span></span><a class="headerlink" href="#CameraFeeds.patientId-patientName" title="Link to this definition">¶</a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">string</span></code> — required before recording can start.</p>
 </dd></dl>
 
 <p><strong>Methods</strong></p>
 <dl class="js function">
 <dt class="sig sig-object js" id="CameraFeeds.handleRecord">
 <span class="sig-prename descclassname"><span class="n"><span class="pre">CameraFeeds</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">handleRecord</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#CameraFeeds.handleRecord" title="Link to this definition">¶</a></dt>
-<dd><p><em>Async.</em> Validates <code class="docutils literal notranslate"><span class="pre">patientId</span></code> / <code class="docutils literal notranslate"><span class="pre">patientName</span></code>, then calls <code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/recording/start</span></code>.
-State transitions to <code class="docutils literal notranslate"><span class="pre">warming_up</span></code> (3-second auto-exposure stabilisation) then <code class="docutils literal notranslate"><span class="pre">recording</span></code>.
-Both cameras are started in parallel on the backend to minimise the inter-camera start offset.</p>
+<dd><p>Validates patient info then calls <code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/recording/start</span></code>. State goes to
+<code class="docutils literal notranslate"><span class="pre">warming_up</span></code> (3s auto exposure stabilization) then <code class="docutils literal notranslate"><span class="pre">recording</span></code>.
+Both cameras start BAG recording in parallel on the backend.</p>
+</dd></dl>
+
+<dl class="js function">
+<dt class="sig sig-object js" id="CameraFeeds.handlePause">
+<span class="sig-prename descclassname"><span class="n"><span class="pre">CameraFeeds</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">handlePause</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#CameraFeeds.handlePause" title="Link to this definition">¶</a></dt>
+<dd><p>Calls <code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/recording/pause</span></code>. This pauses BAG writing on all cameras via the
+RealSense SDK recorder device. The pipeline stays running so the MJPEG preview
+doesnt break. No frames are written to the BAG during pause.</p>
+</dd></dl>
+
+<dl class="js function">
+<dt class="sig sig-object js" id="CameraFeeds.handleResume">
+<span class="sig-prename descclassname"><span class="n"><span class="pre">CameraFeeds</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">handleResume</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#CameraFeeds.handleResume" title="Link to this definition">¶</a></dt>
+<dd><p>Calls <code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/recording/resume</span></code>. Resumes BAG writing on all cameras.</p>
 </dd></dl>
 
 <dl class="js function">
 <dt class="sig sig-object js" id="CameraFeeds.handleStop">
 <span class="sig-prename descclassname"><span class="n"><span class="pre">CameraFeeds</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">handleStop</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#CameraFeeds.handleStop" title="Link to this definition">¶</a></dt>
-<dd><p><em>Async.</em> Calls <code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/recording/stop</span></code>. State returns to <code class="docutils literal notranslate"><span class="pre">idle</span></code>.
-Both cameras are stopped in parallel on the backend.</p>
+<dd><p>Calls <code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/recording/stop</span></code>. Both cameras stop in parallel. Metadata sidecars
+are written with patient info and inter camera sync data (start offset, pipeline
+restart times).</p>
 </dd></dl>
 
 <dl class="js function">
 <dt class="sig sig-object js" id="CameraFeeds.handleSwapCameras">
 <span class="sig-prename descclassname"><span class="n"><span class="pre">CameraFeeds</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">handleSwapCameras</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#CameraFeeds.handleSwapCameras" title="Link to this definition">¶</a></dt>
-<dd><p><em>Async.</em> Calls <code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/cameras/swap</span></code> to flip the logical↔physical camera mapping.
-Useful when physical cameras are plugged into reversed ports.</p>
+<dd><p>Calls <code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/cameras/swap</span></code> to flip the logical to physical camera mapping.
+Useful when physical cameras are plugged into the wrong ports.</p>
 </dd></dl>
 
+<dl class="js function">
+<dt class="sig sig-object js" id="CameraFeeds.handleRefresh">
+<span class="sig-prename descclassname"><span class="n"><span class="pre">CameraFeeds</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">handleRefresh</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#CameraFeeds.handleRefresh" title="Link to this definition">¶</a></dt>
+<dd><p>Calls <code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/cameras/refresh</span></code> to re detect cameras after plug/unplug.
+Disabled during active recording (would kill the streams).</p>
+</dd></dl>
+
+<p><strong>Camera feeds</strong></p>
+<p>Each camera feed is an <code class="docutils literal notranslate"><span class="pre">&lt;img&gt;</span></code> tag pointing at the MJPEG stream endpoint.
+On error it retries with exponential backoff (up to 10 retries). Connection status
+is shown as a colored dot next to the camera label.</p>
+<p>The MJPEG stream is FPS throttled on the backend: 30fps idle, 15fps during recording.</p>
 </dd></dl>
 
 </section>
@@ -309,140 +331,71 @@ Useful when physical cameras are plugged into reversed ports.</p>
 <dl class="js class">
 <dt class="sig sig-object js" id="Tagging">
 <em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="n"><span class="pre">Tagging</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#Tagging" title="Link to this definition">¶</a></dt>
-<dd><p>Video player and frame-accurate annotation tool.
+<dd><p>Frame accurate video player for annotating movement events.
 Located in <code class="docutils literal notranslate"><span class="pre">src/pages/Tagging.tsx</span></code>.</p>
 <p><strong>State</strong></p>
 <dl class="js attribute">
-<dt class="sig sig-object js" id="Tagging.videoFiles">
-<span class="sig-prename descclassname"><span class="n"><span class="pre">Tagging</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">videoFiles</span></span></span><a class="headerlink" href="#Tagging.videoFiles" title="Link to this definition">¶</a></dt>
-<dd><p><code class="docutils literal notranslate"><span class="pre">VideoFile[]</span></code> — MP4 recordings fetched from <code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/recordings</span></code>.</p>
-</dd></dl>
-
-<dl class="js attribute">
-<dt class="sig sig-object js" id="Tagging.selectedVideo">
-<span class="sig-prename descclassname"><span class="n"><span class="pre">Tagging</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">selectedVideo</span></span></span><a class="headerlink" href="#Tagging.selectedVideo" title="Link to this definition">¶</a></dt>
-<dd><p><code class="docutils literal notranslate"><span class="pre">VideoFile</span> <span class="pre">|</span> <span class="pre">null</span></code> — Currently loaded video.</p>
-</dd></dl>
-
-<dl class="js attribute">
 <dt class="sig sig-object js" id="Tagging.actionLogs">
 <span class="sig-prename descclassname"><span class="n"><span class="pre">Tagging</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">actionLogs</span></span></span><a class="headerlink" href="#Tagging.actionLogs" title="Link to this definition">¶</a></dt>
-<dd><p><code class="docutils literal notranslate"><span class="pre">ActionLog[]</span></code> — Tagged events for the current session (frame number + direction label).</p>
+<dd><p><code class="docutils literal notranslate"><span class="pre">ActionLog[]</span></code> — tagged events (frame number + direction label).</p>
 </dd></dl>
 
 <dl class="js attribute">
 <dt class="sig sig-object js" id="Tagging.hasUnsavedChanges">
 <span class="sig-prename descclassname"><span class="n"><span class="pre">Tagging</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">hasUnsavedChanges</span></span></span><a class="headerlink" href="#Tagging.hasUnsavedChanges" title="Link to this definition">¶</a></dt>
-<dd><p><code class="docutils literal notranslate"><span class="pre">boolean</span></code> — Set to <code class="docutils literal notranslate"><span class="pre">true</span></code> when tags are added/deleted, reset to <code class="docutils literal notranslate"><span class="pre">false</span></code> after a
-successful CSV save or a clear. Used as the sole gate for the “unsaved changes” navigation
-blocker (replaces the old <code class="docutils literal notranslate"><span class="pre">actionLogs.length</span> <span class="pre">&gt;</span> <span class="pre">0</span></code> check that incorrectly triggered after saving).</p>
+<dd><p><code class="docutils literal notranslate"><span class="pre">boolean</span></code> — gates the navigation blocker. Reset after save or clear.</p>
 </dd></dl>
 
 <dl class="js attribute">
 <dt class="sig sig-object js" id="Tagging.videoFps">
 <span class="sig-prename descclassname"><span class="n"><span class="pre">Tagging</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">videoFps</span></span></span><a class="headerlink" href="#Tagging.videoFps" title="Link to this definition">¶</a></dt>
-<dd><p><code class="docutils literal notranslate"><span class="pre">number</span></code> — Actual recording FPS fetched from the sidecar metadata via
-<code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/videos/{name}/metadata</span></code>. Falls back to <code class="docutils literal notranslate"><span class="pre">30</span></code> if the endpoint does not return an
-<code class="docutils literal notranslate"><span class="pre">fps</span></code> field. Used for frame-accurate seeking (step size, skip amount).</p>
-</dd></dl>
-
-<dl class="js attribute">
-<dt class="sig sig-object js" id="Tagging.isVideoLoading">
-<span class="sig-prename descclassname"><span class="n"><span class="pre">Tagging</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">isVideoLoading</span></span></span><a class="headerlink" href="#Tagging.isVideoLoading" title="Link to this definition">¶</a></dt>
-<dd><p><code class="docutils literal notranslate"><span class="pre">boolean</span></code> — <code class="docutils literal notranslate"><span class="pre">true</span></code> while the browser is buffering the video (between <code class="docutils literal notranslate"><span class="pre">loadstart</span></code> and
-<code class="docutils literal notranslate"><span class="pre">canplay</span></code>). Drives the loading-spinner overlay.</p>
-</dd></dl>
-
-<dl class="js attribute">
-<dt class="sig sig-object js" id="Tagging.playbackRate">
-<span class="sig-prename descclassname"><span class="n"><span class="pre">Tagging</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">playbackRate</span></span></span><a class="headerlink" href="#Tagging.playbackRate" title="Link to this definition">¶</a></dt>
-<dd><p><code class="docutils literal notranslate"><span class="pre">number</span></code> — Current playback speed (default: <code class="docutils literal notranslate"><span class="pre">1.0</span></code>).</p>
+<dd><p><code class="docutils literal notranslate"><span class="pre">number</span></code> — actual recording FPS from sidecar metadata. Falls back to 30.
+Used for frame accurate seeking.</p>
 </dd></dl>
 
 <p><strong>Methods</strong></p>
 <dl class="js function">
 <dt class="sig sig-object js" id="Tagging.addActionLog">
 <span class="sig-prename descclassname"><span class="n"><span class="pre">Tagging</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">addActionLog</span></span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">direction</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#Tagging.addActionLog" title="Link to this definition">¶</a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Arguments<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>direction</strong> (<span><code class="xref js js-func docutils literal notranslate"><span class="pre">number()</span></code></span>) – Direction ID (0 = Left, 1 = Right, etc.)</p></li>
-</ul>
-</dd>
-</dl>
-<p>Appends a timestamped log entry at the current video frame.
-Sets <code class="docutils literal notranslate"><span class="pre">hasUnsavedChanges</span> <span class="pre">=</span> <span class="pre">true</span></code>.</p>
-</dd></dl>
-
-<dl class="js function">
-<dt class="sig sig-object js" id="Tagging.handleDeleteLog">
-<span class="sig-prename descclassname"><span class="n"><span class="pre">Tagging</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">handleDeleteLog</span></span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">index</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#Tagging.handleDeleteLog" title="Link to this definition">¶</a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Arguments<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>index</strong> (<span><code class="xref js js-func docutils literal notranslate"><span class="pre">number()</span></code></span>) – Index of the log entry to remove.</p></li>
-</ul>
-</dd>
-</dl>
-<p>Removes the entry at <code class="docutils literal notranslate"><span class="pre">index</span></code> from <code class="docutils literal notranslate"><span class="pre">actionLogs</span></code>.
-Sets <code class="docutils literal notranslate"><span class="pre">hasUnsavedChanges</span> <span class="pre">=</span> <span class="pre">true</span></code>.</p>
+<dd><p>Appends a log entry at the current video frame.</p>
 </dd></dl>
 
 <dl class="js function">
 <dt class="sig sig-object js" id="Tagging.handleSave">
 <span class="sig-prename descclassname"><span class="n"><span class="pre">Tagging</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">handleSave</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#Tagging.handleSave" title="Link to this definition">¶</a></dt>
-<dd><p><em>Async.</em> POSTs the CSV payload to <code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/tagging/save</span></code>.
-On success: sets <code class="docutils literal notranslate"><span class="pre">hasUnsavedChanges</span> <span class="pre">=</span> <span class="pre">false</span></code> so the navigation blocker is cleared.</p>
-</dd></dl>
-
-<dl class="js function">
-<dt class="sig sig-object js" id="Tagging.handleClear">
-<span class="sig-prename descclassname"><span class="n"><span class="pre">Tagging</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">handleClear</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#Tagging.handleClear" title="Link to this definition">¶</a></dt>
-<dd><p>Clears <code class="docutils literal notranslate"><span class="pre">actionLogs</span></code> and sets <code class="docutils literal notranslate"><span class="pre">hasUnsavedChanges</span> <span class="pre">=</span> <span class="pre">false</span></code>.</p>
-</dd></dl>
-
-<dl class="js function">
-<dt class="sig sig-object js" id="Tagging.handleFileSelect">
-<span class="sig-prename descclassname"><span class="n"><span class="pre">Tagging</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">handleFileSelect</span></span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">file</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#Tagging.handleFileSelect" title="Link to this definition">¶</a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Arguments<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>file</strong> (<span><code class="xref js js-func docutils literal notranslate"><span class="pre">VideoFile()</span></code></span>) – The video selected in the picker.</p></li>
-</ul>
-</dd>
-</dl>
-<p>Loads the selected video, fetches its metadata (FPS, patient info, camera view),
-and resets <code class="docutils literal notranslate"><span class="pre">hasUnsavedChanges</span></code> to <code class="docutils literal notranslate"><span class="pre">false</span></code> for the new session.</p>
-</dd></dl>
-
-<dl class="js function">
-<dt class="sig sig-object js" id="Tagging.copyToClipboard">
-<span class="sig-prename descclassname"><span class="n"><span class="pre">Tagging</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">copyToClipboard</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#Tagging.copyToClipboard" title="Link to this definition">¶</a></dt>
-<dd><p>Serialises <code class="docutils literal notranslate"><span class="pre">actionLogs</span></code> as <code class="docutils literal notranslate"><span class="pre">frame,direction</span></code> CSV and copies to clipboard.</p>
+<dd><p>POSTs the CSV payload to <code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/tagging/save</span></code>.</p>
 </dd></dl>
 
 <dl class="js function">
 <dt class="sig sig-object js" id="Tagging.detectCameraType">
 <span class="sig-prename descclassname"><span class="n"><span class="pre">Tagging</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">detectCameraType</span></span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filename</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#Tagging.detectCameraType" title="Link to this definition">¶</a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Arguments<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>filename</strong> (<span><code class="xref js js-func docutils literal notranslate"><span class="pre">string()</span></code></span>) – Video filename.</p></li>
-</ul>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p><code class="docutils literal notranslate"><span class="pre">'sagittale'</span></code> | <code class="docutils literal notranslate"><span class="pre">'frontale'</span></code> | <code class="docutils literal notranslate"><span class="pre">null</span></code></p>
-</dd>
-</dl>
-<p>Infers camera view from the filename suffix (<code class="docutils literal notranslate"><span class="pre">_camera1</span></code> → frontale, <code class="docutils literal notranslate"><span class="pre">_camera2</span></code> → sagittale).</p>
+<dd><p>Infers camera view from filename suffix (<code class="docutils literal notranslate"><span class="pre">_camera1</span></code> = frontale, <code class="docutils literal notranslate"><span class="pre">_camera2</span></code> = sagittale).</p>
 </dd></dl>
 
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>The <code class="docutils literal notranslate"><span class="pre">&lt;video&gt;</span></code> element uses <code class="docutils literal notranslate"><span class="pre">preload=&quot;metadata&quot;</span></code> so the browser eagerly loads duration and
-frame-count data. <code class="docutils literal notranslate"><span class="pre">onLoadStart</span></code> / <code class="docutils literal notranslate"><span class="pre">onCanPlay</span></code> / <code class="docutils literal notranslate"><span class="pre">onWaiting</span></code> events toggle
-<code class="docutils literal notranslate"><span class="pre">isVideoLoading</span></code> to show/hide a buffering spinner.</p>
-</div>
+<p>Two camera types have different tag directions:</p>
+<ul class="simple">
+<li><p><strong>Sagittale (Side)</strong>: Left/Right movement</p></li>
+<li><p><strong>Frontale (Front)</strong>: Far-to-Near/Near-to-Far movement</p></li>
+</ul>
+</dd></dl>
+
+</section>
+<section id="conversion">
+<h2>Conversion<a class="headerlink" href="#conversion" title="Link to this heading">¶</a></h2>
+<dl class="js class">
+<dt class="sig sig-object js" id="Conversion">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="n"><span class="pre">Conversion</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#Conversion" title="Link to this definition">¶</a></dt>
+<dd><p>Dashboard for BAG to MP4 conversion.
+Located in <code class="docutils literal notranslate"><span class="pre">src/pages/Conversion.tsx</span></code>.</p>
+<p>Shows a batch dropdown, per camera progress bars with frame counts, encoder type badges
+(NVENC or x264) and completion status. Has a force re convert toggle for overwriting
+existing MP4s.</p>
+<dl class="js function">
+<dt class="sig sig-object js" id="Conversion.startConversion">
+<span class="sig-prename descclassname"><span class="n"><span class="pre">Conversion</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">startConversion</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#Conversion.startConversion" title="Link to this definition">¶</a></dt>
+<dd><p>Calls <code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/conversion/start</span></code>. Polls status until done.</p>
+</dd></dl>
+
 </dd></dl>
 
 </section>
@@ -451,34 +404,14 @@ frame-count data. <code class="docutils literal notranslate"><span class="pre">o
 <dl class="js class">
 <dt class="sig sig-object js" id="Processing">
 <em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="n"><span class="pre">Processing</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#Processing" title="Link to this definition">¶</a></dt>
-<dd><p>Dashboard for managing offline YOLOv8 analysis jobs.
+<dd><p>Dashboard for YOLOv8 pose analysis jobs.
 Located in <code class="docutils literal notranslate"><span class="pre">src/pages/Processing.tsx</span></code>.</p>
-<p><strong>State</strong></p>
-<dl class="js attribute">
-<dt class="sig sig-object js" id="Processing.batches">
-<span class="sig-prename descclassname"><span class="n"><span class="pre">Processing</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">batches</span></span></span><a class="headerlink" href="#Processing.batches" title="Link to this definition">¶</a></dt>
-<dd><p><code class="docutils literal notranslate"><span class="pre">Batch[]</span></code> — Recording sessions grouped by timestamp, fetched from <code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/recordings/batches</span></code>.</p>
-</dd></dl>
-
-<dl class="js attribute">
-<dt class="sig sig-object js" id="Processing.currentJob">
-<span class="sig-prename descclassname"><span class="n"><span class="pre">Processing</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">currentJob</span></span></span><a class="headerlink" href="#Processing.currentJob" title="Link to this definition">¶</a></dt>
-<dd><p><code class="docutils literal notranslate"><span class="pre">ProcessingJob</span> <span class="pre">|</span> <span class="pre">null</span></code> — Active or most-recently-completed job.</p>
-</dd></dl>
-
-<p><strong>Methods</strong></p>
+<p>Select a batch, start processing, watch per camera progress bars.
+Both cameras process in parallel on the backend.</p>
 <dl class="js function">
 <dt class="sig sig-object js" id="Processing.startProcessing">
 <span class="sig-prename descclassname"><span class="n"><span class="pre">Processing</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">startProcessing</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#Processing.startProcessing" title="Link to this definition">¶</a></dt>
-<dd><p><em>Async.</em> Sends <code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/processing/start</span></code> for the selected batch.
-Both cameras are processed in parallel on the backend.</p>
-</dd></dl>
-
-<dl class="js function">
-<dt class="sig sig-object js" id="Processing.pollJobStatus">
-<span class="sig-prename descclassname"><span class="n"><span class="pre">Processing</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">pollJobStatus</span></span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">jobId</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#Processing.pollJobStatus" title="Link to this definition">¶</a></dt>
-<dd><p><em>Async.</em> Polls <code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/processing/status/{jobId}</span></code> until the job reaches
-<code class="docutils literal notranslate"><span class="pre">completed</span></code>, <code class="docutils literal notranslate"><span class="pre">error</span></code>, or <code class="docutils literal notranslate"><span class="pre">cancelled</span></code>. Updates per-camera progress bars.</p>
+<dd><p>Calls <code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/processing/start</span></code>. Polls status until done.</p>
 </dd></dl>
 
 </dd></dl>
@@ -489,45 +422,36 @@ Both cameras are processed in parallel on the backend.</p>
 <dl class="js class">
 <dt class="sig sig-object js" id="FileManager">
 <em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="n"><span class="pre">FileManager</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#FileManager" title="Link to this definition">¶</a></dt>
-<dd><p>File browser for recordings, tagging CSVs, and analysis JSONs.
+<dd><p>File browser with three tabs: videos (BAG + MP4 pairs grouped by batch),
+CSVs (tagging output), JSONs (processing reports).
 Located in <code class="docutils literal notranslate"><span class="pre">src/pages/FileManager.tsx</span></code>.</p>
-<p><strong>State</strong></p>
-<dl class="js attribute">
-<dt class="sig sig-object js" id="FileManager.files">
-<span class="sig-prename descclassname"><span class="n"><span class="pre">FileManager</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">files</span></span></span><a class="headerlink" href="#FileManager.files" title="Link to this definition">¶</a></dt>
-<dd><p><code class="docutils literal notranslate"><span class="pre">AllFiles</span></code> — Lists of <code class="docutils literal notranslate"><span class="pre">videos</span></code>, <code class="docutils literal notranslate"><span class="pre">csvs</span></code>, and <code class="docutils literal notranslate"><span class="pre">jsons</span></code> from <code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/files/all</span></code>.</p>
-</dd></dl>
-
-<dl class="js attribute">
-<dt class="sig sig-object js" id="FileManager.downloadProgress">
-<span class="sig-prename descclassname"><span class="n"><span class="pre">FileManager</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">downloadProgress</span></span></span><a class="headerlink" href="#FileManager.downloadProgress" title="Link to this definition">¶</a></dt>
-<dd><p><code class="docutils literal notranslate"><span class="pre">Record&lt;string,</span> <span class="pre">DownloadProgress&gt;</span></code> — Per-file download percentage, bytes received/total,
-transfer speed, and cancel signal. Shown as a progress bar under each file entry.</p>
-</dd></dl>
-
-<p><strong>Methods</strong></p>
+<p><strong>Downloads</strong></p>
+<p>All downloads use <code class="docutils literal notranslate"><span class="pre">ReadableStream</span></code> for progress tracking with a cancel button.
+Shows separate progress bars for BAG (purple) and MP4 (blue) files.</p>
+<p><strong>Quality analysis modal</strong></p>
+<p>Opens from the quality button on each batch. Replays BAG files to count exact frames
+(can take up to 90s for large files) then shows:</p>
+<ul class="simple">
+<li><p><strong>Score gauge</strong> (0-100): 30pts recording start sync + 20pts frame count sync +
+25pts per camera drop rate</p></li>
+<li><p><strong>Start offset</strong>: how many ms apart the cameras started recording (from pipeline timestamps)</p></li>
+<li><p><strong>MP4/BAG frame deltas</strong>: frame count differences between cameras</p></li>
+<li><p><strong>Per camera cards</strong>: BAG frames, MP4 frames, drop rate, file sizes</p></li>
+<li><p><strong>Sync quality badge</strong>: excellent/good/fair/poor with “No HW sync cable” note</p></li>
+<li><p><strong>Warning banner</strong>: shows when the recording start offset is too high, explaining
+that MP4 files inherit the BAG offset</p></li>
+<li><p><strong>Pipeline restart times</strong>: how long each cameras pipeline took to restart</p></li>
+</ul>
 <dl class="js function">
 <dt class="sig sig-object js" id="FileManager.downloadFile">
 <span class="sig-prename descclassname"><span class="n"><span class="pre">FileManager</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">downloadFile</span></span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">filename</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#FileManager.downloadFile" title="Link to this definition">¶</a></dt>
-<dd><p><em>Async.</em></p>
-<dl class="field-list simple">
-<dt class="field-odd">Arguments<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>type</strong> (<span><code class="xref js js-func docutils literal notranslate"><span class="pre">string()</span></code></span>) – <code class="docutils literal notranslate"><span class="pre">'video'</span></code> | <code class="docutils literal notranslate"><span class="pre">'bag'</span></code> | <code class="docutils literal notranslate"><span class="pre">'csv'</span></code> | <code class="docutils literal notranslate"><span class="pre">'json'</span></code></p></li>
-<li><p><strong>filename</strong> (<span><code class="xref js js-func docutils literal notranslate"><span class="pre">string()</span></code></span>) – Target filename.</p></li>
-</ul>
-</dd>
-</dl>
-<p>All file types are downloaded via a <code class="docutils literal notranslate"><span class="pre">ReadableStream</span></code> so progress is tracked in
-<code class="docutils literal notranslate"><span class="pre">downloadProgress</span></code>. A cancel button aborts the stream mid-transfer.
-Progress bars are shown for both <code class="docutils literal notranslate"><span class="pre">.bag</span></code> (purple) and <code class="docutils literal notranslate"><span class="pre">.mp4</span></code> (blue) files.</p>
+<dd><p>Downloads via <code class="docutils literal notranslate"><span class="pre">ReadableStream</span></code> with progress tracking.</p>
 </dd></dl>
 
 <dl class="js function">
 <dt class="sig sig-object js" id="FileManager.handleDeleteVideoBatch">
 <span class="sig-prename descclassname"><span class="n"><span class="pre">FileManager</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">handleDeleteVideoBatch</span></span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">batchId</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#FileManager.handleDeleteVideoBatch" title="Link to this definition">¶</a></dt>
-<dd><p><em>Async.</em> Deletes both camera recordings (<code class="docutils literal notranslate"><span class="pre">BAG</span></code> + <code class="docutils literal notranslate"><span class="pre">MP4</span></code> + metadata) for a batch via
-<code class="docutils literal notranslate"><span class="pre">DELETE</span> <span class="pre">/files/video/{batchId}</span></code>.</p>
+<dd><p>Deletes BAG + MP4 + metadata for both cameras.</p>
 </dd></dl>
 
 </dd></dl>
@@ -595,49 +519,45 @@ Progress bars are shown for both <code class="docutils literal notranslate"><spa
 <li><a class="reference internal" href="#CameraFeeds"><code class="docutils literal notranslate"><span class="pre">CameraFeeds</span></code></a><ul>
 <li><a class="reference internal" href="#CameraFeeds.recordingState"><code class="docutils literal notranslate"><span class="pre">CameraFeeds.recordingState</span></code></a></li>
 <li><a class="reference internal" href="#CameraFeeds.camerasInfo"><code class="docutils literal notranslate"><span class="pre">CameraFeeds.camerasInfo</span></code></a></li>
-<li><a class="reference internal" href="#CameraFeeds.patientId"><code class="docutils literal notranslate"><span class="pre">CameraFeeds.patientId</span></code></a></li>
-<li><a class="reference internal" href="#CameraFeeds.patientName"><code class="docutils literal notranslate"><span class="pre">CameraFeeds.patientName</span></code></a></li>
+<li><a class="reference internal" href="#CameraFeeds.patientId-patientName"><code class="docutils literal notranslate"><span class="pre">CameraFeeds.patientId</span> <span class="pre">/</span> <span class="pre">patientName</span></code></a></li>
 <li><a class="reference internal" href="#CameraFeeds.handleRecord"><code class="docutils literal notranslate"><span class="pre">CameraFeeds.handleRecord()</span></code></a></li>
+<li><a class="reference internal" href="#CameraFeeds.handlePause"><code class="docutils literal notranslate"><span class="pre">CameraFeeds.handlePause()</span></code></a></li>
+<li><a class="reference internal" href="#CameraFeeds.handleResume"><code class="docutils literal notranslate"><span class="pre">CameraFeeds.handleResume()</span></code></a></li>
 <li><a class="reference internal" href="#CameraFeeds.handleStop"><code class="docutils literal notranslate"><span class="pre">CameraFeeds.handleStop()</span></code></a></li>
 <li><a class="reference internal" href="#CameraFeeds.handleSwapCameras"><code class="docutils literal notranslate"><span class="pre">CameraFeeds.handleSwapCameras()</span></code></a></li>
+<li><a class="reference internal" href="#CameraFeeds.handleRefresh"><code class="docutils literal notranslate"><span class="pre">CameraFeeds.handleRefresh()</span></code></a></li>
 </ul>
 </li>
 </ul>
 </li>
 <li><a class="reference internal" href="#tagging">Tagging</a><ul>
 <li><a class="reference internal" href="#Tagging"><code class="docutils literal notranslate"><span class="pre">Tagging</span></code></a><ul>
-<li><a class="reference internal" href="#Tagging.videoFiles"><code class="docutils literal notranslate"><span class="pre">Tagging.videoFiles</span></code></a></li>
-<li><a class="reference internal" href="#Tagging.selectedVideo"><code class="docutils literal notranslate"><span class="pre">Tagging.selectedVideo</span></code></a></li>
 <li><a class="reference internal" href="#Tagging.actionLogs"><code class="docutils literal notranslate"><span class="pre">Tagging.actionLogs</span></code></a></li>
 <li><a class="reference internal" href="#Tagging.hasUnsavedChanges"><code class="docutils literal notranslate"><span class="pre">Tagging.hasUnsavedChanges</span></code></a></li>
 <li><a class="reference internal" href="#Tagging.videoFps"><code class="docutils literal notranslate"><span class="pre">Tagging.videoFps</span></code></a></li>
-<li><a class="reference internal" href="#Tagging.isVideoLoading"><code class="docutils literal notranslate"><span class="pre">Tagging.isVideoLoading</span></code></a></li>
-<li><a class="reference internal" href="#Tagging.playbackRate"><code class="docutils literal notranslate"><span class="pre">Tagging.playbackRate</span></code></a></li>
 <li><a class="reference internal" href="#Tagging.addActionLog"><code class="docutils literal notranslate"><span class="pre">Tagging.addActionLog()</span></code></a></li>
-<li><a class="reference internal" href="#Tagging.handleDeleteLog"><code class="docutils literal notranslate"><span class="pre">Tagging.handleDeleteLog()</span></code></a></li>
 <li><a class="reference internal" href="#Tagging.handleSave"><code class="docutils literal notranslate"><span class="pre">Tagging.handleSave()</span></code></a></li>
-<li><a class="reference internal" href="#Tagging.handleClear"><code class="docutils literal notranslate"><span class="pre">Tagging.handleClear()</span></code></a></li>
-<li><a class="reference internal" href="#Tagging.handleFileSelect"><code class="docutils literal notranslate"><span class="pre">Tagging.handleFileSelect()</span></code></a></li>
-<li><a class="reference internal" href="#Tagging.copyToClipboard"><code class="docutils literal notranslate"><span class="pre">Tagging.copyToClipboard()</span></code></a></li>
 <li><a class="reference internal" href="#Tagging.detectCameraType"><code class="docutils literal notranslate"><span class="pre">Tagging.detectCameraType()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#conversion">Conversion</a><ul>
+<li><a class="reference internal" href="#Conversion"><code class="docutils literal notranslate"><span class="pre">Conversion</span></code></a><ul>
+<li><a class="reference internal" href="#Conversion.startConversion"><code class="docutils literal notranslate"><span class="pre">Conversion.startConversion()</span></code></a></li>
 </ul>
 </li>
 </ul>
 </li>
 <li><a class="reference internal" href="#processing">Processing</a><ul>
 <li><a class="reference internal" href="#Processing"><code class="docutils literal notranslate"><span class="pre">Processing</span></code></a><ul>
-<li><a class="reference internal" href="#Processing.batches"><code class="docutils literal notranslate"><span class="pre">Processing.batches</span></code></a></li>
-<li><a class="reference internal" href="#Processing.currentJob"><code class="docutils literal notranslate"><span class="pre">Processing.currentJob</span></code></a></li>
 <li><a class="reference internal" href="#Processing.startProcessing"><code class="docutils literal notranslate"><span class="pre">Processing.startProcessing()</span></code></a></li>
-<li><a class="reference internal" href="#Processing.pollJobStatus"><code class="docutils literal notranslate"><span class="pre">Processing.pollJobStatus()</span></code></a></li>
 </ul>
 </li>
 </ul>
 </li>
 <li><a class="reference internal" href="#filemanager">FileManager</a><ul>
 <li><a class="reference internal" href="#FileManager"><code class="docutils literal notranslate"><span class="pre">FileManager</span></code></a><ul>
-<li><a class="reference internal" href="#FileManager.files"><code class="docutils literal notranslate"><span class="pre">FileManager.files</span></code></a></li>
-<li><a class="reference internal" href="#FileManager.downloadProgress"><code class="docutils literal notranslate"><span class="pre">FileManager.downloadProgress</span></code></a></li>
 <li><a class="reference internal" href="#FileManager.downloadFile"><code class="docutils literal notranslate"><span class="pre">FileManager.downloadFile()</span></code></a></li>
 <li><a class="reference internal" href="#FileManager.handleDeleteVideoBatch"><code class="docutils literal notranslate"><span class="pre">FileManager.handleDeleteVideoBatch()</span></code></a></li>
 </ul>

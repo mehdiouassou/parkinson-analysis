@@ -19,189 +19,160 @@ CameraFeeds
 
    .. js:attribute:: camerasInfo
 
-      ``CameraInfo[]`` — Detected RealSense cameras, fetched from ``GET /cameras/info``.
+      ``CameraInfo[]`` — detected RealSense cameras from ``GET /cameras/info``.
 
-   .. js:attribute:: patientId
+   .. js:attribute:: patientId / patientName
 
-      ``string``
-
-   .. js:attribute:: patientName
-
-      ``string``
+      ``string`` — required before recording can start.
 
    **Methods**
 
    .. js:function:: handleRecord()
 
-      *Async.* Validates ``patientId`` / ``patientName``, then calls ``POST /recording/start``.
-      State transitions to ``warming_up`` (3-second auto-exposure stabilisation) then ``recording``.
-      Both cameras are started in parallel on the backend to minimise the inter-camera start offset.
+      Validates patient info then calls ``POST /recording/start``. State goes to
+      ``warming_up`` (3s auto exposure stabilization) then ``recording``.
+      Both cameras start BAG recording in parallel on the backend.
+
+   .. js:function:: handlePause()
+
+      Calls ``POST /recording/pause``. This pauses BAG writing on all cameras via the
+      RealSense SDK recorder device. The pipeline stays running so the MJPEG preview
+      doesnt break. No frames are written to the BAG during pause.
+
+   .. js:function:: handleResume()
+
+      Calls ``POST /recording/resume``. Resumes BAG writing on all cameras.
 
    .. js:function:: handleStop()
 
-      *Async.* Calls ``POST /recording/stop``. State returns to ``idle``.
-      Both cameras are stopped in parallel on the backend.
+      Calls ``POST /recording/stop``. Both cameras stop in parallel. Metadata sidecars
+      are written with patient info and inter camera sync data (start offset, pipeline
+      restart times).
 
    .. js:function:: handleSwapCameras()
 
-      *Async.* Calls ``POST /cameras/swap`` to flip the logical↔physical camera mapping.
-      Useful when physical cameras are plugged into reversed ports.
+      Calls ``POST /cameras/swap`` to flip the logical to physical camera mapping.
+      Useful when physical cameras are plugged into the wrong ports.
+
+   .. js:function:: handleRefresh()
+
+      Calls ``POST /cameras/refresh`` to re detect cameras after plug/unplug.
+      Disabled during active recording (would kill the streams).
+
+   **Camera feeds**
+
+   Each camera feed is an ``<img>`` tag pointing at the MJPEG stream endpoint.
+   On error it retries with exponential backoff (up to 10 retries). Connection status
+   is shown as a colored dot next to the camera label.
+
+   The MJPEG stream is FPS throttled on the backend: 30fps idle, 15fps during recording.
 
 Tagging
 -------
 
 .. js:class:: Tagging
 
-   Video player and frame-accurate annotation tool.
+   Frame accurate video player for annotating movement events.
    Located in ``src/pages/Tagging.tsx``.
 
    **State**
 
-   .. js:attribute:: videoFiles
-
-      ``VideoFile[]`` — MP4 recordings fetched from ``GET /recordings``.
-
-   .. js:attribute:: selectedVideo
-
-      ``VideoFile | null`` — Currently loaded video.
-
    .. js:attribute:: actionLogs
 
-      ``ActionLog[]`` — Tagged events for the current session (frame number + direction label).
+      ``ActionLog[]`` — tagged events (frame number + direction label).
 
    .. js:attribute:: hasUnsavedChanges
 
-      ``boolean`` — Set to ``true`` when tags are added/deleted, reset to ``false`` after a
-      successful CSV save or a clear. Used as the sole gate for the "unsaved changes" navigation
-      blocker (replaces the old ``actionLogs.length > 0`` check that incorrectly triggered after saving).
+      ``boolean`` — gates the navigation blocker. Reset after save or clear.
 
    .. js:attribute:: videoFps
 
-      ``number`` — Actual recording FPS fetched from the sidecar metadata via
-      ``GET /videos/{name}/metadata``. Falls back to ``30`` if the endpoint does not return an
-      ``fps`` field. Used for frame-accurate seeking (step size, skip amount).
-
-   .. js:attribute:: isVideoLoading
-
-      ``boolean`` — ``true`` while the browser is buffering the video (between ``loadstart`` and
-      ``canplay``). Drives the loading-spinner overlay.
-
-   .. js:attribute:: playbackRate
-
-      ``number`` — Current playback speed (default: ``1.0``).
+      ``number`` — actual recording FPS from sidecar metadata. Falls back to 30.
+      Used for frame accurate seeking.
 
    **Methods**
 
    .. js:function:: addActionLog(direction)
 
-      :param number direction: Direction ID (0 = Left, 1 = Right, etc.)
-
-      Appends a timestamped log entry at the current video frame.
-      Sets ``hasUnsavedChanges = true``.
-
-   .. js:function:: handleDeleteLog(index)
-
-      :param number index: Index of the log entry to remove.
-
-      Removes the entry at ``index`` from ``actionLogs``.
-      Sets ``hasUnsavedChanges = true``.
+      Appends a log entry at the current video frame.
 
    .. js:function:: handleSave()
 
-      *Async.* POSTs the CSV payload to ``POST /tagging/save``.
-      On success: sets ``hasUnsavedChanges = false`` so the navigation blocker is cleared.
-
-   .. js:function:: handleClear()
-
-      Clears ``actionLogs`` and sets ``hasUnsavedChanges = false``.
-
-   .. js:function:: handleFileSelect(file)
-
-      :param VideoFile file: The video selected in the picker.
-
-      Loads the selected video, fetches its metadata (FPS, patient info, camera view),
-      and resets ``hasUnsavedChanges`` to ``false`` for the new session.
-
-   .. js:function:: copyToClipboard()
-
-      Serialises ``actionLogs`` as ``frame,direction`` CSV and copies to clipboard.
+      POSTs the CSV payload to ``POST /tagging/save``.
 
    .. js:function:: detectCameraType(filename)
 
-      :param string filename: Video filename.
-      :returns: ``'sagittale'`` | ``'frontale'`` | ``null``
+      Infers camera view from filename suffix (``_camera1`` = frontale, ``_camera2`` = sagittale).
 
-      Infers camera view from the filename suffix (``_camera1`` → frontale, ``_camera2`` → sagittale).
+   Two camera types have different tag directions:
 
-   .. note::
+   - **Sagittale (Side)**: Left/Right movement
+   - **Frontale (Front)**: Far-to-Near/Near-to-Far movement
 
-      The ``<video>`` element uses ``preload="metadata"`` so the browser eagerly loads duration and
-      frame-count data. ``onLoadStart`` / ``onCanPlay`` / ``onWaiting`` events toggle
-      ``isVideoLoading`` to show/hide a buffering spinner.
+Conversion
+----------
+
+.. js:class:: Conversion
+
+   Dashboard for BAG to MP4 conversion.
+   Located in ``src/pages/Conversion.tsx``.
+
+   Shows a batch dropdown, per camera progress bars with frame counts, encoder type badges
+   (NVENC or x264) and completion status. Has a force re convert toggle for overwriting
+   existing MP4s.
+
+   .. js:function:: startConversion()
+
+      Calls ``POST /conversion/start``. Polls status until done.
 
 Processing
 ----------
 
 .. js:class:: Processing
 
-   Dashboard for managing offline YOLOv8 analysis jobs.
+   Dashboard for YOLOv8 pose analysis jobs.
    Located in ``src/pages/Processing.tsx``.
 
-   **State**
-
-   .. js:attribute:: batches
-
-      ``Batch[]`` — Recording sessions grouped by timestamp, fetched from ``GET /recordings/batches``.
-
-   .. js:attribute:: currentJob
-
-      ``ProcessingJob | null`` — Active or most-recently-completed job.
-
-   **Methods**
+   Select a batch, start processing, watch per camera progress bars.
+   Both cameras process in parallel on the backend.
 
    .. js:function:: startProcessing()
 
-      *Async.* Sends ``POST /processing/start`` for the selected batch.
-      Both cameras are processed in parallel on the backend.
-
-   .. js:function:: pollJobStatus(jobId)
-
-      *Async.* Polls ``GET /processing/status/{jobId}`` until the job reaches
-      ``completed``, ``error``, or ``cancelled``. Updates per-camera progress bars.
+      Calls ``POST /processing/start``. Polls status until done.
 
 FileManager
 -----------
 
 .. js:class:: FileManager
 
-   File browser for recordings, tagging CSVs, and analysis JSONs.
+   File browser with three tabs: videos (BAG + MP4 pairs grouped by batch),
+   CSVs (tagging output), JSONs (processing reports).
    Located in ``src/pages/FileManager.tsx``.
 
-   **State**
+   **Downloads**
 
-   .. js:attribute:: files
+   All downloads use ``ReadableStream`` for progress tracking with a cancel button.
+   Shows separate progress bars for BAG (purple) and MP4 (blue) files.
 
-      ``AllFiles`` — Lists of ``videos``, ``csvs``, and ``jsons`` from ``GET /files/all``.
+   **Quality analysis modal**
 
-   .. js:attribute:: downloadProgress
+   Opens from the quality button on each batch. Replays BAG files to count exact frames
+   (can take up to 90s for large files) then shows:
 
-      ``Record<string, DownloadProgress>`` — Per-file download percentage, bytes received/total,
-      transfer speed, and cancel signal. Shown as a progress bar under each file entry.
-
-   **Methods**
+   - **Score gauge** (0-100): 30pts recording start sync + 20pts frame count sync +
+     25pts per camera drop rate
+   - **Start offset**: how many ms apart the cameras started recording (from pipeline timestamps)
+   - **MP4/BAG frame deltas**: frame count differences between cameras
+   - **Per camera cards**: BAG frames, MP4 frames, drop rate, file sizes
+   - **Sync quality badge**: excellent/good/fair/poor with "No HW sync cable" note
+   - **Warning banner**: shows when the recording start offset is too high, explaining
+     that MP4 files inherit the BAG offset
+   - **Pipeline restart times**: how long each cameras pipeline took to restart
 
    .. js:function:: downloadFile(type, filename)
 
-      *Async.*
-
-      :param string type: ``'video'`` | ``'bag'`` | ``'csv'`` | ``'json'``
-      :param string filename: Target filename.
-
-      All file types are downloaded via a ``ReadableStream`` so progress is tracked in
-      ``downloadProgress``. A cancel button aborts the stream mid-transfer.
-      Progress bars are shown for both ``.bag`` (purple) and ``.mp4`` (blue) files.
+      Downloads via ``ReadableStream`` with progress tracking.
 
    .. js:function:: handleDeleteVideoBatch(batchId)
 
-      *Async.* Deletes both camera recordings (``BAG`` + ``MP4`` + metadata) for a batch via
-      ``DELETE /files/video/{batchId}``.
+      Deletes BAG + MP4 + metadata for both cameras.

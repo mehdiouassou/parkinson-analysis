@@ -191,12 +191,13 @@
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
   <p class="caption" role="heading"><span class="caption-text">Backend</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="../backend/main.html">API: Main Application (FastAPI)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/processing.html">API: Processing (YOLOv8 &amp; Motion)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/camera.html">API: Camera Interface (RealSense/Bag)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/config.html">API: Configuration</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/models.html">API: Data Models (Pydantic)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/writers.html">API: Writers (Video &amp; Data)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/main.html">Main Application (FastAPI)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/camera.html">Camera Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/config.html">Configuration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/conversion.html">Conversion Pipeline</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/processing.html">Processing Pipeline (YOLOv8)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/models.html">Data Models (Pydantic)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/writers.html">Writers</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">Frontend</span></p>
 <ul>
@@ -249,6 +250,7 @@
 <span class="sd">    camera.py      - Camera source abstraction (RealSense, .bag)</span>
 <span class="sd">    writers.py     - Video writers (BAG, MP4, FFmpeg)</span>
 <span class="sd">    processing.py  - Video processing and analysis pipeline</span>
+<span class="sd">    conversion.py  - Post-recording BAG→MP4 conversion pipeline</span>
 
 <span class="sd">Camera Modes (set via CAMERA_MODE env var):</span>
 <span class="sd">    auto           - Auto-detect RealSense cameras (DEFAULT)</span>
@@ -257,8 +259,8 @@
 
 <span class="sd">Recording Behavior:</span>
 <span class="sd">    RealSense cameras:</span>
-<span class="sd">        - .bag file (depth + RGB) for processing</span>
-<span class="sd">        - .mp4 file (RGB only) for viewing/tagging</span>
+<span class="sd">        - .bag file (depth + RGB) only — zero-drop, SDK-managed</span>
+<span class="sd">        - .mp4 is generated post-recording via the Conversion page</span>
 
 <span class="sd">Camera Priority:</span>
 <span class="sd">    Camera 0 (CAM1/Front)  is the first detected RealSense device.</span>
@@ -266,7 +268,7 @@
 <span class="sd">    If only one camera is connected, only camera1 files are recorded.</span>
 <span class="sd">&quot;&quot;&quot;</span>
 
-<span class="kn">from</span><span class="w"> </span><span class="nn">fastapi</span><span class="w"> </span><span class="kn">import</span> <span class="n">FastAPI</span><span class="p">,</span> <span class="n">Request</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fastapi</span><span class="w"> </span><span class="kn">import</span> <span class="n">FastAPI</span><span class="p">,</span> <span class="n">Request</span><span class="p">,</span> <span class="n">BackgroundTasks</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">fastapi.responses</span><span class="w"> </span><span class="kn">import</span> <span class="n">StreamingResponse</span><span class="p">,</span> <span class="n">FileResponse</span><span class="p">,</span> <span class="n">JSONResponse</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">fastapi.middleware.cors</span><span class="w"> </span><span class="kn">import</span> <span class="n">CORSMiddleware</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">cv2</span>
@@ -286,26 +288,27 @@
     <span class="n">PROCESSED_DIR</span><span class="p">,</span>
     <span class="n">FFMPEG_AVAILABLE</span><span class="p">,</span>
     <span class="n">REALSENSE_AVAILABLE</span><span class="p">,</span>
+    <span class="n">rs</span><span class="p">,</span>
     <span class="n">imageio_ffmpeg</span><span class="p">,</span>
     <span class="n">JPEG_QUALITY</span><span class="p">,</span>
     <span class="n">DEFAULT_FPS</span><span class="p">,</span>
     <span class="n">CAMERA_TYPE_REALSENSE</span><span class="p">,</span>
     <span class="n">get_detected_cameras</span><span class="p">,</span>
-    <span class="n">refresh_camera_detection</span>
+    <span class="n">refresh_camera_detection</span><span class="p">,</span>
+    <span class="n">SYSTEM_STATE</span><span class="p">,</span>
+    <span class="n">state_lock</span>
 <span class="p">)</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">models</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
     <span class="n">ActionLog</span><span class="p">,</span>
     <span class="n">SaveTaggingRequest</span><span class="p">,</span>
     <span class="n">ProcessRequest</span><span class="p">,</span>
-    <span class="n">RecordingStartRequest</span>
+    <span class="n">RecordingStartRequest</span><span class="p">,</span>
+    <span class="n">ConversionStartRequest</span><span class="p">,</span>
 <span class="p">)</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">camera</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
     <span class="n">get_camera_source</span><span class="p">,</span>
     <span class="n">shutdown_all_cameras</span><span class="p">,</span>
     <span class="n">camera_sources</span>
-<span class="p">)</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">writers</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
-    <span class="n">create_mp4_writer</span>
 <span class="p">)</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">processing</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
     <span class="n">process_video</span><span class="p">,</span>
@@ -314,6 +317,14 @@
     <span class="n">cancel_job</span><span class="p">,</span>
     <span class="n">get_all_jobs</span><span class="p">,</span>
     <span class="n">is_batch_processing</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">conversion</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">convert_bag_to_mp4</span><span class="p">,</span>
+    <span class="n">create_conversion_job</span><span class="p">,</span>
+    <span class="n">get_conversion_job</span><span class="p">,</span>
+    <span class="n">cancel_conversion_job</span><span class="p">,</span>
+    <span class="n">get_all_conversion_jobs</span><span class="p">,</span>
+    <span class="n">is_batch_converting</span><span class="p">,</span>
 <span class="p">)</span>
 
 
@@ -346,16 +357,16 @@
     <span class="s2">&quot;start_time&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>         <span class="c1"># Actual recording start (set after warm-up)</span>
     <span class="s2">&quot;warmup_start&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>       <span class="c1"># When warm-up began (for countdown)</span>
     <span class="s2">&quot;timestamp_str&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>      <span class="c1"># Timestamp string used for file naming</span>
-    <span class="s2">&quot;writers_mp4&quot;</span><span class="p">:</span> <span class="p">{},</span>          <span class="c1"># logical_cam_id -&gt; VideoWriter (compressed MP4 for viewing)</span>
     <span class="s2">&quot;writers_bag&quot;</span><span class="p">:</span> <span class="p">{},</span>          <span class="c1"># logical_cam_id -&gt; True/None (BAG recording via pipeline)</span>
-    <span class="s2">&quot;filenames_mp4&quot;</span><span class="p">:</span> <span class="p">{},</span>        <span class="c1"># logical_cam_id -&gt; filename</span>
     <span class="s2">&quot;filenames_bag&quot;</span><span class="p">:</span> <span class="p">{},</span>        <span class="c1"># logical_cam_id -&gt; filename</span>
     <span class="s2">&quot;camera_types&quot;</span><span class="p">:</span> <span class="p">{},</span>         <span class="c1"># logical_cam_id -&gt; camera_type</span>
-    <span class="s2">&quot;frame_size&quot;</span><span class="p">:</span> <span class="p">{},</span>           <span class="c1"># logical_cam_id -&gt; (width, height)</span>
-    <span class="s2">&quot;frame_counts&quot;</span><span class="p">:</span> <span class="p">{},</span>         <span class="c1"># logical_cam_id -&gt; frames written to MP4</span>
-    <span class="s2">&quot;fps&quot;</span><span class="p">:</span> <span class="n">DEFAULT_FPS</span><span class="p">,</span>
+    <span class="s2">&quot;fps_per_cam&quot;</span><span class="p">:</span> <span class="p">{},</span>          <span class="c1"># logical_cam_id -&gt; actual fps at recording start</span>
     <span class="s2">&quot;patient_name&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
-    <span class="s2">&quot;patient_id&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span>
+    <span class="s2">&quot;patient_id&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+    <span class="c1"># Sync tracking</span>
+    <span class="s2">&quot;recording_start_times&quot;</span><span class="p">:</span> <span class="p">{},</span>    <span class="c1"># logical_cam_id -&gt; ISO timestamp</span>
+    <span class="s2">&quot;inter_camera_offset_ms&quot;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span>  <span class="c1"># ms between camera starts</span>
+    <span class="s2">&quot;pipeline_restart_ms&quot;</span><span class="p">:</span> <span class="p">{},</span>      <span class="c1"># logical_cam_id -&gt; ms for pipeline restart</span>
 <span class="p">}</span>
 <span class="n">recording_lock</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span>
 
@@ -390,6 +401,10 @@
 <span class="c1">#                         FRAME STREAMING GENERATOR</span>
 <span class="c1"># =============================================================================</span>
 
+<span class="n">STREAM_FPS_IDLE</span> <span class="o">=</span> <span class="mi">30</span>       <span class="c1"># Preview FPS when not recording (smooth enough)</span>
+<span class="n">STREAM_FPS_RECORDING</span> <span class="o">=</span> <span class="mi">15</span>  <span class="c1"># Preview FPS during recording (save CPU/bandwidth for BAG)</span>
+
+
 <div class="viewcode-block" id="gen_frames">
 <a class="viewcode-back" href="../backend/main.html#main.gen_frames">[docs]</a>
 <span class="k">def</span><span class="w"> </span><span class="nf">gen_frames</span><span class="p">(</span><span class="n">camera_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
@@ -399,39 +414,68 @@
 <span class="sd">    Handles:</span>
 <span class="sd">        - Reading frames from camera source (via physical ID after swap)</span>
 <span class="sd">        - JPEG encoding for streaming</span>
+<span class="sd">        - FPS throttling: 30 fps idle, 15 fps during recording to save</span>
+<span class="sd">          CPU/bandwidth on Jetson AGX Orin with dual RealSense cameras</span>
+<span class="sd">        - Graceful stream termination when camera goes offline so the browser</span>
+<span class="sd">          fires onError and the frontend can retry with exponential back-off.</span>
 
 <span class="sd">    MP4 recording is handled directly by the capture thread (decoupled).</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="n">last_good_frame</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="c1"># Count consecutive iterations where the camera is offline or delivering</span>
+    <span class="c1"># no frames.  Once the threshold is exceeded we close the stream so the</span>
+    <span class="c1"># frontend&#39;s onError handler fires and retries with exponential back-off.</span>
+    <span class="n">offline_ticks</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">MAX_OFFLINE_TICKS</span> <span class="o">=</span> <span class="mi">60</span>  <span class="c1"># ~2 s at 30 fps; camera hiccups are tolerated</span>
+
     <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="c1"># Determine target FPS based on recording state — checked every frame</span>
+        <span class="c1"># so transitions are picked up immediately without restarting the stream.</span>
+        <span class="n">is_recording</span> <span class="o">=</span> <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;recording&quot;</span><span class="p">,</span> <span class="s2">&quot;warming_up&quot;</span><span class="p">,</span> <span class="s2">&quot;paused&quot;</span><span class="p">)</span>
+        <span class="n">target_fps</span> <span class="o">=</span> <span class="n">STREAM_FPS_RECORDING</span> <span class="k">if</span> <span class="n">is_recording</span> <span class="k">else</span> <span class="n">STREAM_FPS_IDLE</span>
+        <span class="n">frame_interval</span> <span class="o">=</span> <span class="mf">1.0</span> <span class="o">/</span> <span class="n">target_fps</span>
+
+        <span class="n">frame_start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">monotonic</span><span class="p">()</span>
+
         <span class="c1"># Re-evaluate every frame so a camera swap is picked up immediately</span>
         <span class="n">physical_id</span> <span class="o">=</span> <span class="n">get_physical_camera_id</span><span class="p">(</span><span class="n">camera_id</span><span class="p">)</span>
         <span class="n">camera</span> <span class="o">=</span> <span class="n">get_camera_source</span><span class="p">(</span><span class="n">physical_id</span><span class="p">)</span>
 
         <span class="n">frame</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">camera_running</span> <span class="o">=</span> <span class="n">camera</span><span class="o">.</span><span class="n">is_running</span><span class="p">()</span>
 
-        <span class="k">if</span> <span class="n">camera</span><span class="o">.</span><span class="n">is_running</span><span class="p">():</span>
+        <span class="k">if</span> <span class="n">camera_running</span><span class="p">:</span>
             <span class="n">ret</span><span class="p">,</span> <span class="n">frame</span><span class="p">,</span> <span class="n">depth</span> <span class="o">=</span> <span class="n">camera</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
             <span class="k">if</span> <span class="n">ret</span> <span class="ow">and</span> <span class="n">frame</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
                 <span class="n">last_good_frame</span> <span class="o">=</span> <span class="n">frame</span>
+                <span class="n">offline_ticks</span> <span class="o">=</span> <span class="mi">0</span>
             <span class="k">else</span><span class="p">:</span>
-                <span class="n">frame</span> <span class="o">=</span> <span class="n">last_good_frame</span>  <span class="c1"># Serve last good frame during hiccups</span>
+                <span class="c1"># Brief read failure — serve last good frame</span>
+                <span class="n">frame</span> <span class="o">=</span> <span class="n">last_good_frame</span>
         <span class="k">else</span><span class="p">:</span>
-            <span class="n">frame</span> <span class="o">=</span> <span class="n">last_good_frame</span>  <span class="c1"># Serve last good frame during pipeline restart</span>
+            <span class="c1"># Camera not running (starting up or disconnected)</span>
+            <span class="n">frame</span> <span class="o">=</span> <span class="n">last_good_frame</span>
+            <span class="n">offline_ticks</span> <span class="o">+=</span> <span class="mi">1</span>
+
+        <span class="k">if</span> <span class="n">offline_ticks</span> <span class="o">&gt;</span> <span class="n">MAX_OFFLINE_TICKS</span><span class="p">:</span>
+            <span class="c1"># Camera has been offline too long — close the MJPEG stream.</span>
+            <span class="c1"># The browser detects the closed connection and fires onError on</span>
+            <span class="c1"># the &lt;img&gt; tag, which triggers the frontend&#39;s retry back-off.</span>
+            <span class="k">break</span>
 
         <span class="k">if</span> <span class="n">frame</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-            <span class="c1"># Truly no frame available yet (initial connection)</span>
-            <span class="n">frame</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="mi">480</span><span class="p">,</span> <span class="mi">848</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">)</span>
-            <span class="n">cv2</span><span class="o">.</span><span class="n">putText</span><span class="p">(</span><span class="n">frame</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;CAM </span><span class="si">{</span><span class="n">camera_id</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="p">(</span><span class="mi">220</span><span class="p">,</span> <span class="mi">220</span><span class="p">),</span>
-                       <span class="n">cv2</span><span class="o">.</span><span class="n">FONT_HERSHEY_SIMPLEX</span><span class="p">,</span> <span class="mf">1.5</span><span class="p">,</span> <span class="p">(</span><span class="mi">100</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">100</span><span class="p">),</span> <span class="mi">2</span><span class="p">)</span>
-            <span class="n">cv2</span><span class="o">.</span><span class="n">putText</span><span class="p">(</span><span class="n">frame</span><span class="p">,</span> <span class="s2">&quot;NO SIGNAL&quot;</span><span class="p">,</span> <span class="p">(</span><span class="mi">230</span><span class="p">,</span> <span class="mi">270</span><span class="p">),</span>
-                       <span class="n">cv2</span><span class="o">.</span><span class="n">FONT_HERSHEY_SIMPLEX</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="p">(</span><span class="mi">100</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">100</span><span class="p">),</span> <span class="mi">2</span><span class="p">)</span>
-            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.5</span><span class="p">)</span>
+            <span class="c1"># No frame yet (camera still initialising) — pause briefly</span>
+            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.033</span><span class="p">)</span>
+            <span class="k">continue</span>
 
         <span class="n">_</span><span class="p">,</span> <span class="n">buffer</span> <span class="o">=</span> <span class="n">cv2</span><span class="o">.</span><span class="n">imencode</span><span class="p">(</span><span class="s1">&#39;.jpg&#39;</span><span class="p">,</span> <span class="n">frame</span><span class="p">,</span> <span class="p">[</span><span class="n">cv2</span><span class="o">.</span><span class="n">IMWRITE_JPEG_QUALITY</span><span class="p">,</span> <span class="n">JPEG_QUALITY</span><span class="p">])</span>
         <span class="k">yield</span> <span class="p">(</span><span class="sa">b</span><span class="s1">&#39;--frame</span><span class="se">\r\n</span><span class="s1">Content-Type: image/jpeg</span><span class="se">\r\n\r\n</span><span class="s1">&#39;</span> <span class="o">+</span> <span class="n">buffer</span><span class="o">.</span><span class="n">tobytes</span><span class="p">()</span> <span class="o">+</span> <span class="sa">b</span><span class="s1">&#39;</span><span class="se">\r\n</span><span class="s1">&#39;</span><span class="p">)</span>
 
-        <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.015</span><span class="p">)</span></div>
+        <span class="c1"># Sleep precisely to hit the target FPS instead of a fixed 15ms</span>
+        <span class="n">elapsed</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">monotonic</span><span class="p">()</span> <span class="o">-</span> <span class="n">frame_start</span>
+        <span class="n">sleep_time</span> <span class="o">=</span> <span class="n">frame_interval</span> <span class="o">-</span> <span class="n">elapsed</span>
+        <span class="k">if</span> <span class="n">sleep_time</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">sleep_time</span><span class="p">)</span></div>
 
 
 
@@ -441,7 +485,23 @@
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;/camera/</span><span class="si">{camera_id}</span><span class="s2">&quot;</span><span class="p">)</span>
 <span class="k">def</span><span class="w"> </span><span class="nf">video_feed</span><span class="p">(</span><span class="n">camera_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;Stream MJPEG video from camera 0 or 1.&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Stream MJPEG video from camera 0 or 1.</span>
+
+<span class="sd">    Returns HTTP 503 when the camera is not yet running so the browser&#39;s</span>
+<span class="sd">    &lt;img&gt; onError fires immediately and the frontend can retry with</span>
+<span class="sd">    exponential back-off without keeping a long-lived connection alive.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">physical_id</span> <span class="o">=</span> <span class="n">get_physical_camera_id</span><span class="p">(</span><span class="n">camera_id</span><span class="p">)</span>
+    <span class="n">camera</span> <span class="o">=</span> <span class="n">get_camera_source</span><span class="p">(</span><span class="n">physical_id</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">camera</span><span class="o">.</span><span class="n">is_running</span><span class="p">():</span>
+        <span class="k">return</span> <span class="n">JSONResponse</span><span class="p">(</span>
+            <span class="n">status_code</span><span class="o">=</span><span class="mi">503</span><span class="p">,</span>
+            <span class="n">content</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;error&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;Camera </span><span class="si">{</span><span class="n">camera_id</span><span class="si">}</span><span class="s2"> not available&quot;</span><span class="p">},</span>
+            <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;Retry-After&quot;</span><span class="p">:</span> <span class="s2">&quot;2&quot;</span><span class="p">},</span>
+        <span class="p">)</span>
+
     <span class="k">return</span> <span class="n">StreamingResponse</span><span class="p">(</span>
         <span class="n">gen_frames</span><span class="p">(</span><span class="n">camera_id</span><span class="p">),</span>
         <span class="n">media_type</span><span class="o">=</span><span class="s2">&quot;multipart/x-mixed-replace; boundary=frame&quot;</span>
@@ -454,10 +514,13 @@
 
 <span class="k">def</span><span class="w"> </span><span class="nf">_start_camera_recording</span><span class="p">(</span><span class="n">cam_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">timestamp_str</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">result_dict</span><span class="p">:</span> <span class="nb">dict</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">    Start BAG + MP4 recording for a single logical camera.</span>
+<span class="sd">    Start BAG-only recording for a single logical camera.</span>
 
 <span class="sd">    Called in parallel threads (one per camera) so both cameras start at</span>
 <span class="sd">    nearly the same time, minimising the inter-camera frame offset.</span>
+
+<span class="sd">    Captures high-precision timestamps (time.monotonic) before and after</span>
+<span class="sd">    pipeline restart so the inter-camera start offset can be computed.</span>
 
 <span class="sd">    Result is stored in result_dict[cam_id] for the caller to inspect.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
@@ -470,108 +533,117 @@
         <span class="k">return</span>
 
     <span class="n">camera_type</span> <span class="o">=</span> <span class="n">camera</span><span class="o">.</span><span class="n">camera_type</span>
-    <span class="n">actual_fps</span> <span class="o">=</span> <span class="n">camera</span><span class="o">.</span><span class="n">fps</span>  <span class="c1"># Use ACTUAL camera FPS, not DEFAULT_FPS</span>
+    <span class="n">actual_fps</span> <span class="o">=</span> <span class="n">camera</span><span class="o">.</span><span class="n">fps</span>
     <span class="n">frame_size</span> <span class="o">=</span> <span class="n">camera</span><span class="o">.</span><span class="n">frame_size</span> <span class="ow">or</span> <span class="p">(</span><span class="mi">848</span><span class="p">,</span> <span class="mi">480</span><span class="p">)</span>
 
     <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Recording] Logical cam </span><span class="si">{</span><span class="n">cam_id</span><span class="si">}</span><span class="s2"> (physical </span><span class="si">{</span><span class="n">physical_id</span><span class="si">}</span><span class="s2">): </span><span class="si">{</span><span class="n">camera_type</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">frame_size</span><span class="si">}</span><span class="s2">@</span><span class="si">{</span><span class="n">actual_fps</span><span class="si">}</span><span class="s2">fps&quot;</span><span class="p">)</span>
 
-    <span class="c1"># BAG recording (RealSense depth + RGB) — restarts pipeline</span>
     <span class="n">bag_filename</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">timestamp_str</span><span class="si">}</span><span class="s2">_camera</span><span class="si">{</span><span class="n">cam_id</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="si">}</span><span class="s2">.bag&quot;</span>
     <span class="n">bag_filepath</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="n">bag_filename</span><span class="p">)</span>
 
+    <span class="c1"># Capture precise timestamps around recording start for sync analysis</span>
+    <span class="n">t_before</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">monotonic</span><span class="p">()</span>
     <span class="n">bag_success</span> <span class="o">=</span> <span class="n">camera</span><span class="o">.</span><span class="n">start_recording</span><span class="p">(</span><span class="n">bag_filepath</span><span class="p">)</span>
+    <span class="n">t_after</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">monotonic</span><span class="p">()</span>
+
+    <span class="n">recording_started_at</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">isoformat</span><span class="p">()</span>
+
     <span class="k">if</span> <span class="n">bag_success</span><span class="p">:</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Recording] BAG started for logical cam </span><span class="si">{</span><span class="n">cam_id</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">bag_filepath</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Recording] BAG started for logical cam </span><span class="si">{</span><span class="n">cam_id</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">bag_filepath</span><span class="si">}</span><span class="s2"> &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;(pipeline restart took </span><span class="si">{</span><span class="p">(</span><span class="n">t_after</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">t_before</span><span class="p">)</span><span class="o">*</span><span class="mi">1000</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2">ms)&quot;</span><span class="p">)</span>
     <span class="k">else</span><span class="p">:</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Recording] BAG failed for logical cam </span><span class="si">{</span><span class="n">cam_id</span><span class="si">}</span><span class="s2">, no high-quality recording&quot;</span><span class="p">)</span>
-
-    <span class="c1"># MP4 preview writer — uses actual camera FPS</span>
-    <span class="n">mp4_filename</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">timestamp_str</span><span class="si">}</span><span class="s2">_camera</span><span class="si">{</span><span class="n">cam_id</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="si">}</span><span class="s2">.mp4&quot;</span>
-    <span class="n">mp4_filepath</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="n">mp4_filename</span><span class="p">)</span>
-
-    <span class="n">writer_mp4</span> <span class="o">=</span> <span class="n">create_mp4_writer</span><span class="p">(</span><span class="n">mp4_filepath</span><span class="p">,</span> <span class="n">frame_size</span><span class="p">,</span> <span class="n">actual_fps</span><span class="p">)</span>
-    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Recording] MP4 writer for logical cam </span><span class="si">{</span><span class="n">cam_id</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">mp4_filepath</span><span class="si">}</span><span class="s2">, opened=</span><span class="si">{</span><span class="n">writer_mp4</span><span class="o">.</span><span class="n">isOpened</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-
-    <span class="c1"># Pass MP4 writer to camera capture thread (decoupled from streaming)</span>
-    <span class="n">camera</span><span class="o">.</span><span class="n">set_mp4_writer</span><span class="p">(</span><span class="n">writer_mp4</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Recording] BAG failed for logical cam </span><span class="si">{</span><span class="n">cam_id</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 
     <span class="n">result_dict</span><span class="p">[</span><span class="n">cam_id</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
-        <span class="s2">&quot;writer_mp4&quot;</span><span class="p">:</span> <span class="n">writer_mp4</span><span class="p">,</span>
-        <span class="s2">&quot;mp4_filename&quot;</span><span class="p">:</span> <span class="n">mp4_filename</span><span class="p">,</span>
         <span class="s2">&quot;bag_filename&quot;</span><span class="p">:</span> <span class="n">bag_filename</span> <span class="k">if</span> <span class="n">bag_success</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
         <span class="s2">&quot;bag_success&quot;</span><span class="p">:</span> <span class="n">bag_success</span><span class="p">,</span>
         <span class="s2">&quot;camera_type&quot;</span><span class="p">:</span> <span class="n">camera_type</span><span class="p">,</span>
-        <span class="s2">&quot;frame_size&quot;</span><span class="p">:</span> <span class="n">frame_size</span><span class="p">,</span>
         <span class="s2">&quot;actual_fps&quot;</span><span class="p">:</span> <span class="n">actual_fps</span><span class="p">,</span>
+        <span class="c1"># Sync tracking — monotonic timestamps for inter-camera offset calculation</span>
+        <span class="s2">&quot;recording_start_mono&quot;</span><span class="p">:</span> <span class="n">t_after</span> <span class="k">if</span> <span class="n">bag_success</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="s2">&quot;recording_start_iso&quot;</span><span class="p">:</span> <span class="n">recording_started_at</span> <span class="k">if</span> <span class="n">bag_success</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="s2">&quot;pipeline_restart_ms&quot;</span><span class="p">:</span> <span class="nb">round</span><span class="p">((</span><span class="n">t_after</span> <span class="o">-</span> <span class="n">t_before</span><span class="p">)</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span>
     <span class="p">}</span>
 
 
 <span class="k">def</span><span class="w"> </span><span class="nf">_initialize_recording</span><span class="p">():</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">    Create VideoWriters for all active cameras and start recording.</span>
+<span class="sd">    Start BAG recording for all active cameras in parallel.</span>
 
 <span class="sd">    Both cameras are started in PARALLEL threads so their recording pipelines</span>
 <span class="sd">    initialise at the same time, minimising the inter-camera start offset.</span>
 
-<span class="sd">    Performs slow operations (pipeline restart, writer creation) WITHOUT</span>
-<span class="sd">    holding the recording lock to avoid blocking the MJPEG streams.</span>
+<span class="sd">    Performs slow operations (pipeline restart) WITHOUT holding the recording</span>
+<span class="sd">    lock to avoid blocking the MJPEG streams.</span>
 
-<span class="sd">    Orphan handling: if only one camera is running, writers are only</span>
-<span class="sd">    created for that camera. No 0-byte files are created for missing cameras.</span>
+<span class="sd">    Orphan handling: if only one camera is running, recording is only</span>
+<span class="sd">    started for that camera. No empty files are created for missing cameras.</span>
 
 <span class="sd">    File naming uses the LOGICAL camera ID (not the physical one):</span>
-<span class="sd">        Logical 0 → _camera1.bag / _camera1.mp4  (Front/Sagittale)</span>
-<span class="sd">        Logical 1 → _camera2.bag / _camera2.mp4  (Side/Frontale)</span>
+<span class="sd">        Logical 0 → _camera1.bag  (Front/Sagittale)</span>
+<span class="sd">        Logical 1 → _camera2.bag  (Side/Frontale)</span>
 <span class="sd">    &quot;&quot;&quot;</span>
-    <span class="c1"># Read state under lock</span>
     <span class="k">with</span> <span class="n">recording_lock</span><span class="p">:</span>
         <span class="k">if</span> <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;warming_up&quot;</span><span class="p">:</span>
-            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[Recording] Warm-up cancelled before writers were created&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[Recording] Warm-up cancelled before recording started&quot;</span><span class="p">)</span>
             <span class="k">return</span>
         <span class="n">timestamp_str</span> <span class="o">=</span> <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;timestamp_str&quot;</span><span class="p">]</span>
 
-    <span class="c1"># ---- Launch both cameras in PARALLEL to minimise start-time offset ----</span>
-    <span class="n">writers_info</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="c1"># Launch both cameras in PARALLEL to minimise start-time offset</span>
+    <span class="n">cam_info</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="p">{}</span>
     <span class="n">threads</span> <span class="o">=</span> <span class="p">[]</span>
     <span class="k">for</span> <span class="n">cam_id</span> <span class="ow">in</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">]:</span>
         <span class="n">t</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">(</span>
             <span class="n">target</span><span class="o">=</span><span class="n">_start_camera_recording</span><span class="p">,</span>
-            <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">cam_id</span><span class="p">,</span> <span class="n">timestamp_str</span><span class="p">,</span> <span class="n">writers_info</span><span class="p">),</span>
+            <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">cam_id</span><span class="p">,</span> <span class="n">timestamp_str</span><span class="p">,</span> <span class="n">cam_info</span><span class="p">),</span>
             <span class="n">daemon</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
         <span class="p">)</span>
         <span class="n">threads</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">t</span><span class="p">)</span>
         <span class="n">t</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
 
-    <span class="c1"># Wait for both cameras to finish initialising</span>
     <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">threads</span><span class="p">:</span>
         <span class="n">t</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
 
-    <span class="c1"># Remove cameras that were offline (result_dict stores None for those)</span>
-    <span class="n">writers_info</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">writers_info</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">v</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">}</span>
+    <span class="c1"># Drop offline cameras (stored as None)</span>
+    <span class="n">cam_info</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">cam_info</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">v</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">}</span>
 
-    <span class="c1"># Store results under lock</span>
     <span class="k">with</span> <span class="n">recording_lock</span><span class="p">:</span>
         <span class="k">if</span> <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;warming_up&quot;</span><span class="p">:</span>
-            <span class="c1"># Cancelled during initialization — clean up</span>
-            <span class="k">for</span> <span class="n">cam_id</span><span class="p">,</span> <span class="n">info</span> <span class="ow">in</span> <span class="n">writers_info</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-                <span class="n">physical_id</span> <span class="o">=</span> <span class="n">get_physical_camera_id</span><span class="p">(</span><span class="n">cam_id</span><span class="p">)</span>
-                <span class="n">camera</span> <span class="o">=</span> <span class="n">get_camera_source</span><span class="p">(</span><span class="n">physical_id</span><span class="p">)</span>
-                <span class="n">camera</span><span class="o">.</span><span class="n">clear_mp4_writer</span><span class="p">()</span>
-                <span class="n">info</span><span class="p">[</span><span class="s2">&quot;writer_mp4&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">release</span><span class="p">()</span>
+            <span class="c1"># Cancelled during startup — stop any BAG pipelines that started</span>
+            <span class="k">for</span> <span class="n">cam_id</span><span class="p">,</span> <span class="n">info</span> <span class="ow">in</span> <span class="n">cam_info</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
                 <span class="k">if</span> <span class="n">info</span><span class="p">[</span><span class="s2">&quot;bag_success&quot;</span><span class="p">]:</span>
-                    <span class="n">camera</span><span class="o">.</span><span class="n">stop_recording</span><span class="p">()</span>
-            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[Recording] Warm-up cancelled during writer initialization&quot;</span><span class="p">)</span>
+                    <span class="k">try</span><span class="p">:</span>
+                        <span class="n">get_camera_source</span><span class="p">(</span><span class="n">get_physical_camera_id</span><span class="p">(</span><span class="n">cam_id</span><span class="p">))</span><span class="o">.</span><span class="n">stop_recording</span><span class="p">()</span>
+                    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+                        <span class="k">pass</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[Recording] Warm-up cancelled during recording startup&quot;</span><span class="p">)</span>
             <span class="k">return</span>
 
-        <span class="k">for</span> <span class="n">cam_id</span><span class="p">,</span> <span class="n">info</span> <span class="ow">in</span> <span class="n">writers_info</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-            <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;writers_mp4&quot;</span><span class="p">][</span><span class="n">cam_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">info</span><span class="p">[</span><span class="s2">&quot;writer_mp4&quot;</span><span class="p">]</span>
-            <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;filenames_mp4&quot;</span><span class="p">][</span><span class="n">cam_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">info</span><span class="p">[</span><span class="s2">&quot;mp4_filename&quot;</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">cam_id</span><span class="p">,</span> <span class="n">info</span> <span class="ow">in</span> <span class="n">cam_info</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
             <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;writers_bag&quot;</span><span class="p">][</span><span class="n">cam_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">info</span><span class="p">[</span><span class="s2">&quot;bag_success&quot;</span><span class="p">]</span>
             <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;filenames_bag&quot;</span><span class="p">][</span><span class="n">cam_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">info</span><span class="p">[</span><span class="s2">&quot;bag_filename&quot;</span><span class="p">]</span>
             <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;camera_types&quot;</span><span class="p">][</span><span class="n">cam_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">info</span><span class="p">[</span><span class="s2">&quot;camera_type&quot;</span><span class="p">]</span>
-            <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;frame_size&quot;</span><span class="p">][</span><span class="n">cam_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">info</span><span class="p">[</span><span class="s2">&quot;frame_size&quot;</span><span class="p">]</span>
-            <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;frame_counts&quot;</span><span class="p">][</span><span class="n">cam_id</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
-            <span class="n">recording_state</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="s2">&quot;fps_per_cam&quot;</span><span class="p">,</span> <span class="p">{})[</span><span class="n">cam_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">info</span><span class="p">[</span><span class="s2">&quot;actual_fps&quot;</span><span class="p">]</span>
+            <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;fps_per_cam&quot;</span><span class="p">][</span><span class="n">cam_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">info</span><span class="p">[</span><span class="s2">&quot;actual_fps&quot;</span><span class="p">]</span>
+
+        <span class="c1"># Compute inter-camera start offset using monotonic timestamps</span>
+        <span class="n">start_monos</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">cid</span><span class="p">:</span> <span class="n">info</span><span class="p">[</span><span class="s2">&quot;recording_start_mono&quot;</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">cid</span><span class="p">,</span> <span class="n">info</span> <span class="ow">in</span> <span class="n">cam_info</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;recording_start_mono&quot;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+        <span class="p">}</span>
+        <span class="n">inter_camera_offset_ms</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">start_monos</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="n">vals</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">start_monos</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+            <span class="n">inter_camera_offset_ms</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="nb">abs</span><span class="p">(</span><span class="n">vals</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="n">vals</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Recording] Inter-camera start offset: </span><span class="si">{</span><span class="n">inter_camera_offset_ms</span><span class="si">}</span><span class="s2">ms&quot;</span><span class="p">)</span>
+
+        <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;recording_start_times&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">cid</span><span class="p">:</span> <span class="n">info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;recording_start_iso&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">cid</span><span class="p">,</span> <span class="n">info</span> <span class="ow">in</span> <span class="n">cam_info</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+        <span class="p">}</span>
+        <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;inter_camera_offset_ms&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">inter_camera_offset_ms</span>
+        <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;pipeline_restart_ms&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">cid</span><span class="p">:</span> <span class="n">info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;pipeline_restart_ms&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="k">for</span> <span class="n">cid</span><span class="p">,</span> <span class="n">info</span> <span class="ow">in</span> <span class="n">cam_info</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+        <span class="p">}</span>
 
         <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;recording&quot;</span>
         <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;start_time&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>
@@ -608,7 +680,6 @@
         <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;patient_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">patientId</span> <span class="k">if</span> <span class="n">data</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
         <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;timestamp_str&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">timestamp_str</span>
         <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;warmup_start&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">timestamp</span>
-        <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;frame_counts&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
         <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;warming_up&quot;</span>
 
     <span class="k">def</span><span class="w"> </span><span class="nf">warmup_then_record</span><span class="p">():</span>
@@ -628,55 +699,67 @@
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="s2">&quot;/recording/pause&quot;</span><span class="p">)</span>
 <span class="k">def</span><span class="w"> </span><span class="nf">pause_recording</span><span class="p">():</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;Pause recording.&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Pause recording — pauses BAG writing on all active cameras.</span>
+
+<span class="sd">    The RealSense pipeline stays running (MJPEG streaming continues)</span>
+<span class="sd">    but frames are no longer written to disk. This gives a true pause</span>
+<span class="sd">    so the resulting BAG has no gap/filler frames.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">with</span> <span class="n">recording_lock</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;recording&quot;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">],</span> <span class="s2">&quot;message&quot;</span><span class="p">:</span> <span class="s2">&quot;Not recording&quot;</span><span class="p">}</span>
         <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;paused&quot;</span>
-        <span class="c1"># Pause MP4 writing on all cameras</span>
-        <span class="k">for</span> <span class="n">cam_id</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;writers_mp4&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">keys</span><span class="p">()):</span>
-            <span class="n">physical_id</span> <span class="o">=</span> <span class="n">get_physical_camera_id</span><span class="p">(</span><span class="n">cam_id</span><span class="p">)</span>
-            <span class="k">try</span><span class="p">:</span>
-                <span class="n">camera</span> <span class="o">=</span> <span class="n">get_camera_source</span><span class="p">(</span><span class="n">physical_id</span><span class="p">)</span>
-                <span class="n">camera</span><span class="o">.</span><span class="n">pause_mp4_writer</span><span class="p">()</span>
-            <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
-                <span class="k">pass</span>
-    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="s2">&quot;paused&quot;</span><span class="p">,</span> <span class="s2">&quot;message&quot;</span><span class="p">:</span> <span class="s2">&quot;Recording paused&quot;</span><span class="p">}</span>
+
+    <span class="c1"># Pause BAG recording on all active cameras (outside lock to avoid blocking)</span>
+    <span class="k">for</span> <span class="n">cam_id</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;writers_bag&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">keys</span><span class="p">()):</span>
+        <span class="k">if</span> <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;writers_bag&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cam_id</span><span class="p">):</span>
+            <span class="n">physical_cam</span> <span class="o">=</span> <span class="n">get_camera_source</span><span class="p">(</span><span class="n">get_physical_camera_id</span><span class="p">(</span><span class="n">cam_id</span><span class="p">))</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">physical_cam</span><span class="o">.</span><span class="n">pause_recording</span><span class="p">():</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Recording] Warning: failed to pause BAG on cam </span><span class="si">{</span><span class="n">cam_id</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="s2">&quot;paused&quot;</span><span class="p">,</span> <span class="s2">&quot;message&quot;</span><span class="p">:</span> <span class="s2">&quot;Recording paused (BAG writing stopped)&quot;</span><span class="p">}</span>
 
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="s2">&quot;/recording/resume&quot;</span><span class="p">)</span>
 <span class="k">def</span><span class="w"> </span><span class="nf">resume_recording</span><span class="p">():</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;Resume recording.&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Resume recording — resumes BAG writing on all active cameras.</span>
+
+<span class="sd">    Both cameras are resumed in parallel to minimise inter-camera</span>
+<span class="sd">    resume offset.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">with</span> <span class="n">recording_lock</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;paused&quot;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">],</span> <span class="s2">&quot;message&quot;</span><span class="p">:</span> <span class="s2">&quot;Not paused&quot;</span><span class="p">}</span>
         <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;recording&quot;</span>
-        <span class="c1"># Resume MP4 writing on all cameras</span>
-        <span class="k">for</span> <span class="n">cam_id</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;writers_mp4&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">keys</span><span class="p">()):</span>
-            <span class="n">physical_id</span> <span class="o">=</span> <span class="n">get_physical_camera_id</span><span class="p">(</span><span class="n">cam_id</span><span class="p">)</span>
-            <span class="k">try</span><span class="p">:</span>
-                <span class="n">camera</span> <span class="o">=</span> <span class="n">get_camera_source</span><span class="p">(</span><span class="n">physical_id</span><span class="p">)</span>
-                <span class="n">camera</span><span class="o">.</span><span class="n">resume_mp4_writer</span><span class="p">()</span>
-            <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
-                <span class="k">pass</span>
+
+    <span class="c1"># Resume BAG recording on all active cameras</span>
+    <span class="k">for</span> <span class="n">cam_id</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;writers_bag&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">keys</span><span class="p">()):</span>
+        <span class="k">if</span> <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;writers_bag&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cam_id</span><span class="p">):</span>
+            <span class="n">physical_cam</span> <span class="o">=</span> <span class="n">get_camera_source</span><span class="p">(</span><span class="n">get_physical_camera_id</span><span class="p">(</span><span class="n">cam_id</span><span class="p">))</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">physical_cam</span><span class="o">.</span><span class="n">resume_recording</span><span class="p">():</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Recording] Warning: failed to resume BAG on cam </span><span class="si">{</span><span class="n">cam_id</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
     <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="s2">&quot;recording&quot;</span><span class="p">,</span> <span class="s2">&quot;message&quot;</span><span class="p">:</span> <span class="s2">&quot;Recording resumed&quot;</span><span class="p">}</span>
 
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="s2">&quot;/recording/stop&quot;</span><span class="p">)</span>
 <span class="k">def</span><span class="w"> </span><span class="nf">stop_recording</span><span class="p">():</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">    Stop recording and save files with metadata sidecars.</span>
+<span class="sd">    Stop recording and save BAG files with metadata sidecars.</span>
 
-<span class="sd">    RealSense cameras produce: .bag + .mp4</span>
-<span class="sd">    If called during warm-up, cancels the warm-up before any writers are created.</span>
-<span class="sd">    BAG and MP4 pipelines for both cameras are stopped in parallel to minimise</span>
+<span class="sd">    If called during warm-up, cancels before any writers are created.</span>
+<span class="sd">    BAG pipelines for both cameras are stopped in parallel to minimise</span>
 <span class="sd">    the inter-camera stop-time offset.</span>
+
+<span class="sd">    MP4 files are NOT created here — use the Conversion page post-recording.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
-    <span class="n">mp4_files</span> <span class="o">=</span> <span class="p">[]</span>
     <span class="n">bag_files</span> <span class="o">=</span> <span class="p">[]</span>
     <span class="n">patient_name</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
     <span class="n">patient_id</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
     <span class="n">camera_types</span> <span class="o">=</span> <span class="p">{}</span>
-
-    <span class="c1"># Frame counts and FPS captured BEFORE the writers are released</span>
-    <span class="n">_stop_frame_counts</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="p">{}</span>
-    <span class="n">_stop_fps</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">fps_per_cam</span> <span class="o">=</span> <span class="p">{}</span>
 
     <span class="k">with</span> <span class="n">recording_lock</span><span class="p">:</span>
         <span class="k">if</span> <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;idle&quot;</span><span class="p">:</span>
@@ -687,14 +770,16 @@
             <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;warmup_start&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
             <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;timestamp_str&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
             <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;camera_types&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
-            <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;frame_counts&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;fps_per_cam&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
             <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;patient_name&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
             <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;patient_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+            <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;recording_start_times&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;inter_camera_offset_ms&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.0</span>
+            <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;pipeline_restart_ms&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
             <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[Recording] Warm-up cancelled by stop request&quot;</span><span class="p">)</span>
             <span class="k">return</span> <span class="p">{</span>
                 <span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="s2">&quot;idle&quot;</span><span class="p">,</span>
                 <span class="s2">&quot;message&quot;</span><span class="p">:</span> <span class="s2">&quot;Recording cancelled during warm-up&quot;</span><span class="p">,</span>
-                <span class="s2">&quot;mp4_files&quot;</span><span class="p">:</span> <span class="p">[],</span>
                 <span class="s2">&quot;bag_files&quot;</span><span class="p">:</span> <span class="p">[],</span>
                 <span class="s2">&quot;path&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">RECORDINGS_DIR</span><span class="p">)</span>
             <span class="p">}</span>
@@ -704,66 +789,39 @@
         <span class="n">patient_id</span> <span class="o">=</span> <span class="n">recording_state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;patient_id&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
         <span class="n">camera_types</span> <span class="o">=</span> <span class="n">recording_state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;camera_types&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
         <span class="n">fps_per_cam</span> <span class="o">=</span> <span class="n">recording_state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;fps_per_cam&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
-
-        <span class="c1"># Collect writers and filenames before clearing state</span>
         <span class="n">writers_bag</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;writers_bag&quot;</span><span class="p">])</span>
-        <span class="n">writers_mp4</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;writers_mp4&quot;</span><span class="p">])</span>
         <span class="n">filenames_bag</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;filenames_bag&quot;</span><span class="p">])</span>
-        <span class="n">filenames_mp4</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;filenames_mp4&quot;</span><span class="p">])</span>
+        <span class="n">inter_camera_offset_ms</span> <span class="o">=</span> <span class="n">recording_state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;inter_camera_offset_ms&quot;</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span>
+        <span class="n">recording_start_times</span> <span class="o">=</span> <span class="n">recording_state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;recording_start_times&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="n">pipeline_restart_ms</span> <span class="o">=</span> <span class="n">recording_state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;pipeline_restart_ms&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
 
         <span class="c1"># Clear state immediately to prevent concurrent operations</span>
         <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;idle&quot;</span>
         <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;start_time&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
         <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;warmup_start&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
         <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;timestamp_str&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
-        <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;writers_mp4&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
         <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;writers_bag&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
-        <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;filenames_mp4&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
         <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;filenames_bag&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
         <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;camera_types&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
-        <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;frame_counts&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
         <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;fps_per_cam&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
         <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;patient_name&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
         <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;patient_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+        <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;recording_start_times&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;inter_camera_offset_ms&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;pipeline_restart_ms&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
 
-    <span class="c1"># ----- Capture frame counts BEFORE writers are released -----</span>
-    <span class="k">for</span> <span class="n">cam_id</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">writers_mp4</span><span class="o">.</span><span class="n">keys</span><span class="p">()):</span>
-        <span class="n">physical_id</span> <span class="o">=</span> <span class="n">get_physical_camera_id</span><span class="p">(</span><span class="n">cam_id</span><span class="p">)</span>
-        <span class="k">try</span><span class="p">:</span>
-            <span class="n">camera</span> <span class="o">=</span> <span class="n">camera_sources</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">physical_id</span><span class="p">)</span>
-            <span class="k">if</span> <span class="n">camera</span><span class="p">:</span>
-                <span class="n">_stop_frame_counts</span><span class="p">[</span><span class="n">cam_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">camera</span><span class="o">.</span><span class="n">get_mp4_frame_count</span><span class="p">()</span>
-        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
-            <span class="n">_stop_frame_counts</span><span class="p">[</span><span class="n">cam_id</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
-        <span class="n">_stop_fps</span><span class="p">[</span><span class="n">cam_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">fps_per_cam</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cam_id</span><span class="p">,</span> <span class="n">DEFAULT_FPS</span><span class="p">)</span>
+    <span class="c1"># ----- Stop BAG recordings in PARALLEL -----</span>
+    <span class="n">stop_timestamps</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="p">{}</span>  <span class="c1"># cam_id -&gt; ISO timestamp when recording actually stopped</span>
 
-    <span class="c1"># ----- Clear MP4 writers from camera capture threads (parallel) -----</span>
-    <span class="k">def</span><span class="w"> </span><span class="nf">_clear_writer</span><span class="p">(</span><span class="n">cam_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
-        <span class="n">physical_id</span> <span class="o">=</span> <span class="n">get_physical_camera_id</span><span class="p">(</span><span class="n">cam_id</span><span class="p">)</span>
-        <span class="k">try</span><span class="p">:</span>
-            <span class="n">camera</span> <span class="o">=</span> <span class="n">camera_sources</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">physical_id</span><span class="p">)</span>
-            <span class="k">if</span> <span class="n">camera</span><span class="p">:</span>
-                <span class="n">camera</span><span class="o">.</span><span class="n">clear_mp4_writer</span><span class="p">()</span>
-        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Recording] Error clearing MP4 writer cam </span><span class="si">{</span><span class="n">cam_id</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-
-    <span class="n">clear_threads</span> <span class="o">=</span> <span class="p">[</span><span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">_clear_writer</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">c</span><span class="p">,),</span> <span class="n">daemon</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-                     <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">writers_mp4</span><span class="o">.</span><span class="n">keys</span><span class="p">())]</span>
-    <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">clear_threads</span><span class="p">:</span>
-        <span class="n">t</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
-    <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">clear_threads</span><span class="p">:</span>
-        <span class="n">t</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
-
-    <span class="c1"># ----- Stop BAG recordings and release MP4 writers in PARALLEL -----</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">_stop_cam_resources</span><span class="p">(</span><span class="n">cam_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Stop BAG + release MP4 writer for one camera.&quot;&quot;&quot;</span>
-        <span class="c1"># Stop BAG</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Stop BAG recording for one camera and collect the filename.&quot;&quot;&quot;</span>
         <span class="n">is_recording</span> <span class="o">=</span> <span class="n">writers_bag</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cam_id</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
         <span class="k">if</span> <span class="n">is_recording</span><span class="p">:</span>
             <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Recording] Stopping BAG recording logical cam </span><span class="si">{</span><span class="n">cam_id</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="k">try</span><span class="p">:</span>
                 <span class="n">physical_cam</span> <span class="o">=</span> <span class="n">get_camera_source</span><span class="p">(</span><span class="n">get_physical_camera_id</span><span class="p">(</span><span class="n">cam_id</span><span class="p">))</span>
                 <span class="n">physical_cam</span><span class="o">.</span><span class="n">stop_recording</span><span class="p">()</span>
+                <span class="n">stop_timestamps</span><span class="p">[</span><span class="n">cam_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">isoformat</span><span class="p">()</span>
             <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
                 <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Recording] Error stopping BAG cam </span><span class="si">{</span><span class="n">cam_id</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 
@@ -779,61 +837,44 @@
             <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
                 <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Recording] Error checking BAG file </span><span class="si">{</span><span class="n">bag_filename</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 
-        <span class="c1"># Release MP4 writer</span>
-        <span class="n">writer</span> <span class="o">=</span> <span class="n">writers_mp4</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cam_id</span><span class="p">)</span>
-        <span class="k">if</span> <span class="n">writer</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Recording] Releasing MP4 writer logical cam </span><span class="si">{</span><span class="n">cam_id</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-            <span class="k">try</span><span class="p">:</span>
-                <span class="n">writer</span><span class="o">.</span><span class="n">release</span><span class="p">()</span>
-            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Recording] Error releasing MP4 writer cam </span><span class="si">{</span><span class="n">cam_id</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-
-        <span class="n">mp4_filename</span> <span class="o">=</span> <span class="n">filenames_mp4</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cam_id</span><span class="p">)</span>
-        <span class="k">if</span> <span class="n">mp4_filename</span><span class="p">:</span>
-            <span class="n">filepath</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="n">mp4_filename</span>
-            <span class="k">try</span><span class="p">:</span>
-                <span class="n">exists</span> <span class="o">=</span> <span class="n">filepath</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span>
-                <span class="n">size</span> <span class="o">=</span> <span class="n">filepath</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span> <span class="k">if</span> <span class="n">exists</span> <span class="k">else</span> <span class="mi">0</span>
-                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Recording] MP4 </span><span class="si">{</span><span class="n">mp4_filename</span><span class="si">}</span><span class="s2">: frames=</span><span class="si">{</span><span class="n">_stop_frame_counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cam_id</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;?&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">, exists=</span><span class="si">{</span><span class="n">exists</span><span class="si">}</span><span class="s2">, size=</span><span class="si">{</span><span class="n">size</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-                <span class="k">if</span> <span class="n">exists</span> <span class="ow">and</span> <span class="n">size</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
-                    <span class="n">mp4_files</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">mp4_filename</span><span class="p">)</span>
-            <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Recording] Error checking MP4 file </span><span class="si">{</span><span class="n">mp4_filename</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-
-    <span class="n">all_cam_ids</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">writers_bag</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span> <span class="o">+</span> <span class="nb">list</span><span class="p">(</span><span class="n">writers_mp4</span><span class="o">.</span><span class="n">keys</span><span class="p">()))</span>
-    <span class="n">stop_threads</span> <span class="o">=</span> <span class="p">[</span><span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">_stop_cam_resources</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">c</span><span class="p">,),</span> <span class="n">daemon</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-                    <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">all_cam_ids</span><span class="p">]</span>
+    <span class="n">stop_threads</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">_stop_cam_resources</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">c</span><span class="p">,),</span> <span class="n">daemon</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">writers_bag</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
+    <span class="p">]</span>
     <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">stop_threads</span><span class="p">:</span>
         <span class="n">t</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
     <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">stop_threads</span><span class="p">:</span>
         <span class="n">t</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
 
-    <span class="c1"># Save metadata sidecar for each MP4 file</span>
-    <span class="k">for</span> <span class="n">mp4_file</span> <span class="ow">in</span> <span class="n">mp4_files</span><span class="p">:</span>
-        <span class="n">base_name</span> <span class="o">=</span> <span class="n">mp4_file</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;.mp4&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+    <span class="c1"># Save metadata sidecar for each BAG file — includes sync tracking data</span>
+    <span class="k">for</span> <span class="n">bag_file</span> <span class="ow">in</span> <span class="n">bag_files</span><span class="p">:</span>
+        <span class="n">base_name</span> <span class="o">=</span> <span class="n">bag_file</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;.bag&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
         <span class="n">metadata_file</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">base_name</span><span class="si">}</span><span class="s2">_metadata.json&quot;</span>
         <span class="n">metadata_path</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="n">metadata_file</span>
 
         <span class="n">cam_id</span> <span class="o">=</span> <span class="mi">0</span> <span class="k">if</span> <span class="s1">&#39;_camera1&#39;</span> <span class="ow">in</span> <span class="n">base_name</span> <span class="k">else</span> <span class="mi">1</span> <span class="k">if</span> <span class="s1">&#39;_camera2&#39;</span> <span class="ow">in</span> <span class="n">base_name</span> <span class="k">else</span> <span class="o">-</span><span class="mi">1</span>
         <span class="n">cam_type</span> <span class="o">=</span> <span class="n">camera_types</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cam_id</span><span class="p">,</span> <span class="n">CAMERA_TYPE_REALSENSE</span><span class="p">)</span>
-        <span class="c1"># Logical cam_id 0 = Front/Sagittale, cam_id 1 = Side/Frontale</span>
         <span class="n">camera_view</span> <span class="o">=</span> <span class="s2">&quot;Front&quot;</span> <span class="k">if</span> <span class="n">cam_id</span> <span class="o">==</span> <span class="mi">0</span> <span class="k">else</span> <span class="s2">&quot;Side&quot;</span>
-
-        <span class="c1"># Try to retrieve frame counts saved during stop</span>
-        <span class="n">cam_mp4_frames</span> <span class="o">=</span> <span class="n">_stop_frame_counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cam_id</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
 
         <span class="n">metadata_content</span> <span class="o">=</span> <span class="p">{</span>
             <span class="s2">&quot;patient_name&quot;</span><span class="p">:</span> <span class="n">patient_name</span><span class="p">,</span>
             <span class="s2">&quot;patient_id&quot;</span><span class="p">:</span> <span class="n">patient_id</span><span class="p">,</span>
-            <span class="s2">&quot;mp4_file&quot;</span><span class="p">:</span> <span class="n">mp4_file</span><span class="p">,</span>
-            <span class="s2">&quot;bag_file&quot;</span><span class="p">:</span> <span class="n">mp4_file</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;.mp4&#39;</span><span class="p">,</span> <span class="s1">&#39;.bag&#39;</span><span class="p">),</span>
-            <span class="s2">&quot;hq_file&quot;</span><span class="p">:</span> <span class="n">mp4_file</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;.mp4&#39;</span><span class="p">,</span> <span class="s1">&#39;.bag&#39;</span><span class="p">),</span>
+            <span class="s2">&quot;bag_file&quot;</span><span class="p">:</span> <span class="n">bag_file</span><span class="p">,</span>
             <span class="s2">&quot;camera_type&quot;</span><span class="p">:</span> <span class="n">cam_type</span><span class="p">,</span>
-            <span class="s2">&quot;camera_view&quot;</span><span class="p">:</span> <span class="n">camera_view</span><span class="p">,</span>  <span class="c1"># &quot;Front&quot; or &quot;Side&quot; for tagging page</span>
-            <span class="s2">&quot;fps&quot;</span><span class="p">:</span> <span class="n">_stop_fps</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cam_id</span><span class="p">,</span> <span class="n">DEFAULT_FPS</span><span class="p">),</span>  <span class="c1"># Actual recording FPS</span>
-            <span class="s2">&quot;mp4_frames&quot;</span><span class="p">:</span> <span class="n">cam_mp4_frames</span><span class="p">,</span>               <span class="c1"># Frames written to MP4</span>
+            <span class="s2">&quot;camera_view&quot;</span><span class="p">:</span> <span class="n">camera_view</span><span class="p">,</span>
+            <span class="s2">&quot;fps&quot;</span><span class="p">:</span> <span class="n">fps_per_cam</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cam_id</span><span class="p">,</span> <span class="n">DEFAULT_FPS</span><span class="p">),</span>
             <span class="s2">&quot;recorded_at&quot;</span><span class="p">:</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">isoformat</span><span class="p">(),</span>
-            <span class="s2">&quot;camera_mode&quot;</span><span class="p">:</span> <span class="n">CAMERA_MODE</span>
+            <span class="s2">&quot;camera_mode&quot;</span><span class="p">:</span> <span class="n">CAMERA_MODE</span><span class="p">,</span>
+            <span class="c1"># Sync tracking — per-camera start/stop times and inter-camera offset</span>
+            <span class="s2">&quot;recording_started_at&quot;</span><span class="p">:</span> <span class="n">recording_start_times</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cam_id</span><span class="p">),</span>
+            <span class="s2">&quot;recording_stopped_at&quot;</span><span class="p">:</span> <span class="n">stop_timestamps</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cam_id</span><span class="p">),</span>
+            <span class="s2">&quot;inter_camera_offset_ms&quot;</span><span class="p">:</span> <span class="n">inter_camera_offset_ms</span><span class="p">,</span>
+            <span class="s2">&quot;pipeline_restart_ms&quot;</span><span class="p">:</span> <span class="n">pipeline_restart_ms</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cam_id</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+            <span class="c1"># MP4 fields — populated by conversion.py after BAG→MP4 conversion</span>
+            <span class="s2">&quot;mp4_file&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+            <span class="s2">&quot;mp4_frames&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+            <span class="s2">&quot;mp4_source&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+            <span class="s2">&quot;converted_at&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
         <span class="p">}</span>
         <span class="n">metadata_path</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">metadata_content</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
         <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Recording] Metadata saved: </span><span class="si">{</span><span class="n">metadata_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
@@ -841,7 +882,6 @@
     <span class="k">return</span> <span class="p">{</span>
         <span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="s2">&quot;idle&quot;</span><span class="p">,</span>
         <span class="s2">&quot;message&quot;</span><span class="p">:</span> <span class="s2">&quot;Recording stopped&quot;</span><span class="p">,</span>
-        <span class="s2">&quot;mp4_files&quot;</span><span class="p">:</span> <span class="n">mp4_files</span><span class="p">,</span>
         <span class="s2">&quot;bag_files&quot;</span><span class="p">:</span> <span class="n">bag_files</span><span class="p">,</span>
         <span class="s2">&quot;path&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">RECORDINGS_DIR</span><span class="p">)</span>
     <span class="p">}</span>
@@ -856,8 +896,7 @@
 <span class="sd">        status:            idle | warming_up | recording | paused</span>
 <span class="sd">        duration:          seconds elapsed since recording started (None during warm-up)</span>
 <span class="sd">        warmup_remaining:  seconds left in warm-up countdown (None when not warming up)</span>
-<span class="sd">        frame_counts:      dict of camera_id -&gt; frames written to MP4</span>
-<span class="sd">        current_filenames: dict of &quot;camN_mp4/bag&quot; -&gt; filename (populated after warm-up)</span>
+<span class="sd">        current_filenames: dict of &quot;camN_bag&quot; -&gt; filename (populated after warm-up)</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">with</span> <span class="n">recording_lock</span><span class="p">:</span>
         <span class="n">status</span> <span class="o">=</span> <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]</span>
@@ -875,23 +914,9 @@
             <span class="n">warmup_remaining</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">WARMUP_DURATION</span> <span class="o">-</span> <span class="n">elapsed</span><span class="p">)</span>
 
         <span class="n">current_filenames</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="p">{}</span>
-        <span class="k">for</span> <span class="n">cam_id</span><span class="p">,</span> <span class="n">fname</span> <span class="ow">in</span> <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;filenames_mp4&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-            <span class="k">if</span> <span class="n">fname</span><span class="p">:</span>
-                <span class="n">current_filenames</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;cam</span><span class="si">{</span><span class="n">cam_id</span><span class="si">}</span><span class="s2">_mp4&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">fname</span>
         <span class="k">for</span> <span class="n">cam_id</span><span class="p">,</span> <span class="n">fname</span> <span class="ow">in</span> <span class="n">recording_state</span><span class="p">[</span><span class="s2">&quot;filenames_bag&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
             <span class="k">if</span> <span class="n">fname</span><span class="p">:</span>
                 <span class="n">current_filenames</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;cam</span><span class="si">{</span><span class="n">cam_id</span><span class="si">}</span><span class="s2">_bag&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">fname</span>
-
-        <span class="c1"># Get live frame counts from camera capture threads</span>
-        <span class="n">live_frame_counts</span> <span class="o">=</span> <span class="p">{}</span>
-        <span class="k">if</span> <span class="n">status</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;recording&quot;</span><span class="p">,</span> <span class="s2">&quot;paused&quot;</span><span class="p">):</span>
-            <span class="k">for</span> <span class="n">cam_id</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">recording_state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;writers_mp4&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">keys</span><span class="p">()):</span>
-                <span class="n">physical_id</span> <span class="o">=</span> <span class="n">get_physical_camera_id</span><span class="p">(</span><span class="n">cam_id</span><span class="p">)</span>
-                <span class="n">camera</span> <span class="o">=</span> <span class="n">camera_sources</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">physical_id</span><span class="p">)</span>
-                <span class="k">if</span> <span class="n">camera</span><span class="p">:</span>
-                    <span class="n">live_frame_counts</span><span class="p">[</span><span class="n">cam_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">camera</span><span class="o">.</span><span class="n">get_mp4_frame_count</span><span class="p">()</span>
-                <span class="k">else</span><span class="p">:</span>
-                    <span class="n">live_frame_counts</span><span class="p">[</span><span class="n">cam_id</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
 
         <span class="k">return</span> <span class="p">{</span>
             <span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="n">status</span><span class="p">,</span>
@@ -900,7 +925,6 @@
             <span class="s2">&quot;start_time&quot;</span><span class="p">:</span> <span class="n">start_time</span><span class="o">.</span><span class="n">isoformat</span><span class="p">()</span> <span class="k">if</span> <span class="n">start_time</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
             <span class="s2">&quot;duration&quot;</span><span class="p">:</span> <span class="n">duration</span><span class="p">,</span>
             <span class="s2">&quot;warmup_remaining&quot;</span><span class="p">:</span> <span class="n">warmup_remaining</span><span class="p">,</span>
-            <span class="s2">&quot;frame_counts&quot;</span><span class="p">:</span> <span class="n">live_frame_counts</span><span class="p">,</span>
             <span class="s2">&quot;current_filenames&quot;</span><span class="p">:</span> <span class="n">current_filenames</span><span class="p">,</span>
         <span class="p">}</span>
 
@@ -951,21 +975,31 @@
     <span class="p">}</span>
 
 
+
+
+
+
 <span class="nd">@app</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="s2">&quot;/cameras/refresh&quot;</span><span class="p">)</span>
 <span class="k">def</span><span class="w"> </span><span class="nf">refresh_cameras</span><span class="p">():</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Force re-detection of cameras.</span>
-
 <span class="sd">    Call this if you&#39;ve plugged in or unplugged cameras.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
-    <span class="n">refresh_camera_detection</span><span class="p">()</span>
+    <span class="c1"># 1. Stop all cameras first to release USB handles</span>
     <span class="n">shutdown_all_cameras</span><span class="p">()</span>
+    
+    <span class="c1"># 2. Refresh detection logic (simple, fast, no retries)</span>
+    <span class="n">refresh_camera_detection</span><span class="p">()</span>
 
+    <span class="c1"># 3. Return result</span>
     <span class="n">detected</span> <span class="o">=</span> <span class="n">get_detected_cameras</span><span class="p">()</span>
     <span class="k">return</span> <span class="p">{</span>
         <span class="s2">&quot;message&quot;</span><span class="p">:</span> <span class="s2">&quot;Cameras refreshed&quot;</span><span class="p">,</span>
         <span class="s2">&quot;detected&quot;</span><span class="p">:</span> <span class="n">detected</span>
     <span class="p">}</span>
+
+
+
 
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="s2">&quot;/cameras/swap&quot;</span><span class="p">)</span>
@@ -1074,6 +1108,8 @@
                     <span class="s2">&quot;camera2&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
                     <span class="s2">&quot;camera1_hq&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
                     <span class="s2">&quot;camera2_hq&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+                    <span class="s2">&quot;camera1_has_mp4&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+                    <span class="s2">&quot;camera2_has_mp4&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
                     <span class="s2">&quot;camera1_type&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
                     <span class="s2">&quot;camera2_type&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
                     <span class="s2">&quot;complete&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
@@ -1083,13 +1119,16 @@
                 <span class="p">}</span>
 
             <span class="n">mp4_file</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">.mp4&quot;</span>
+            <span class="n">mp4_exists</span> <span class="o">=</span> <span class="n">mp4_file</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span>
             <span class="k">if</span> <span class="n">camera_num</span> <span class="o">==</span> <span class="s2">&quot;1&quot;</span><span class="p">:</span>
                 <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;camera1_hq&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">name</span>
-                <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;camera1&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">mp4_file</span><span class="o">.</span><span class="n">name</span> <span class="k">if</span> <span class="n">mp4_file</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="k">else</span> <span class="n">f</span><span class="o">.</span><span class="n">name</span>
+                <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;camera1&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">mp4_file</span><span class="o">.</span><span class="n">name</span> <span class="k">if</span> <span class="n">mp4_exists</span> <span class="k">else</span> <span class="n">f</span><span class="o">.</span><span class="n">name</span>
+                <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;camera1_has_mp4&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">mp4_exists</span>
                 <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;camera1_type&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">CAMERA_TYPE_REALSENSE</span>
             <span class="k">elif</span> <span class="n">camera_num</span> <span class="o">==</span> <span class="s2">&quot;2&quot;</span><span class="p">:</span>
                 <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;camera2_hq&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">name</span>
-                <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;camera2&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">mp4_file</span><span class="o">.</span><span class="n">name</span> <span class="k">if</span> <span class="n">mp4_file</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="k">else</span> <span class="n">f</span><span class="o">.</span><span class="n">name</span>
+                <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;camera2&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">mp4_file</span><span class="o">.</span><span class="n">name</span> <span class="k">if</span> <span class="n">mp4_exists</span> <span class="k">else</span> <span class="n">f</span><span class="o">.</span><span class="n">name</span>
+                <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;camera2_has_mp4&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">mp4_exists</span>
                 <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;camera2_type&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">CAMERA_TYPE_REALSENSE</span>
 
             <span class="n">mtime</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">fromtimestamp</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_mtime</span><span class="p">)</span><span class="o">.</span><span class="n">isoformat</span><span class="p">()</span>
@@ -1161,7 +1200,7 @@
             <span class="s2">&quot;fps&quot;</span><span class="p">:</span> <span class="n">DEFAULT_FPS</span><span class="p">,</span>
         <span class="p">}</span>
 
-        <span class="c1"># Read FPS and MP4 frame count from sidecar (fast, no need to decode)</span>
+        <span class="c1"># Read FPS, sync data, and MP4 frame count from sidecar</span>
         <span class="k">if</span> <span class="n">meta_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
             <span class="k">try</span><span class="p">:</span>
                 <span class="n">meta</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">meta_path</span><span class="o">.</span><span class="n">read_text</span><span class="p">())</span>
@@ -1169,6 +1208,11 @@
                 <span class="n">sidecar_mp4_frames</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;mp4_frames&quot;</span><span class="p">)</span>
                 <span class="k">if</span> <span class="n">sidecar_mp4_frames</span><span class="p">:</span>
                     <span class="n">cam_result</span><span class="p">[</span><span class="s2">&quot;mp4_frames_from_sidecar&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sidecar_mp4_frames</span>
+                <span class="c1"># Sync tracking data from recording</span>
+                <span class="n">cam_result</span><span class="p">[</span><span class="s2">&quot;recording_started_at&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;recording_started_at&quot;</span><span class="p">)</span>
+                <span class="n">cam_result</span><span class="p">[</span><span class="s2">&quot;recording_stopped_at&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;recording_stopped_at&quot;</span><span class="p">)</span>
+                <span class="n">cam_result</span><span class="p">[</span><span class="s2">&quot;inter_camera_offset_ms&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;inter_camera_offset_ms&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+                <span class="n">cam_result</span><span class="p">[</span><span class="s2">&quot;pipeline_restart_ms&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;pipeline_restart_ms&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
             <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
                 <span class="k">pass</span>
 
@@ -1185,28 +1229,54 @@
             <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
                 <span class="n">cam_result</span><span class="p">[</span><span class="s2">&quot;mp4_frames_error&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
 
-        <span class="c1"># Count BAG frames by playing back (slow but accurate; skip if no RS)</span>
-        <span class="c1"># We use the sidecar mp4_frames as a reference instead since BAG has</span>
-        <span class="c1"># the same number of color frames as were captured by the pipeline.</span>
-        <span class="c1"># A fast approximation: BAG size / (avg bytes per frame).</span>
-        <span class="c1"># For now, estimate using fps × duration from mp4.</span>
-        <span class="k">if</span> <span class="n">bag_path</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="ow">and</span> <span class="n">cam_result</span><span class="p">[</span><span class="s2">&quot;mp4_frames&quot;</span><span class="p">]:</span>
-            <span class="c1"># BAG and MP4 share the same capture pipeline, so BAG contains</span>
-            <span class="c1"># at least as many color frames as the MP4 (often more because</span>
-            <span class="c1"># MP4 can drop frames under CPU load, BAG records raw).</span>
-            <span class="c1"># We estimate BAG frames from file size heuristic.</span>
+        <span class="c1"># Count BAG frames by replaying through pyrealsense2 with real-time</span>
+        <span class="c1"># disabled so the pipeline runs as fast as disk I/O allows.</span>
+        <span class="c1"># This is exact (not an estimate) but takes a few seconds on large files.</span>
+        <span class="k">if</span> <span class="n">bag_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
             <span class="n">bag_size</span> <span class="o">=</span> <span class="n">bag_path</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span>
             <span class="n">mp4_size</span> <span class="o">=</span> <span class="n">mp4_path</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span> <span class="k">if</span> <span class="n">mp4_path</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="k">else</span> <span class="mi">0</span>
-            <span class="c1"># Store sizes for reference</span>
             <span class="n">cam_result</span><span class="p">[</span><span class="s2">&quot;bag_size_mb&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="n">bag_size</span> <span class="o">/</span> <span class="p">(</span><span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">),</span> <span class="mi">1</span><span class="p">)</span>
             <span class="n">cam_result</span><span class="p">[</span><span class="s2">&quot;mp4_size_mb&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="n">mp4_size</span> <span class="o">/</span> <span class="p">(</span><span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">),</span> <span class="mi">1</span><span class="p">)</span>
-            <span class="c1"># BAG duration estimate from mp4 frame count and fps</span>
-            <span class="n">fps</span> <span class="o">=</span> <span class="n">cam_result</span><span class="p">[</span><span class="s2">&quot;fps&quot;</span><span class="p">]</span> <span class="ow">or</span> <span class="n">DEFAULT_FPS</span>
-            <span class="n">mp4_frames</span> <span class="o">=</span> <span class="n">cam_result</span><span class="p">[</span><span class="s2">&quot;mp4_frames&quot;</span><span class="p">]</span> <span class="ow">or</span> <span class="mi">0</span>
-            <span class="n">estimated_duration_s</span> <span class="o">=</span> <span class="n">mp4_frames</span> <span class="o">/</span> <span class="n">fps</span> <span class="k">if</span> <span class="n">fps</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="mi">0</span>
-            <span class="n">estimated_bag_frames</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">estimated_duration_s</span> <span class="o">*</span> <span class="n">fps</span><span class="p">)</span>
-            <span class="n">cam_result</span><span class="p">[</span><span class="s2">&quot;bag_frames&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">estimated_bag_frames</span>
-            <span class="n">cam_result</span><span class="p">[</span><span class="s2">&quot;bag_frames_note&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;Estimated from MP4 duration (same pipeline)&quot;</span>
+
+            <span class="k">if</span> <span class="n">REALSENSE_AVAILABLE</span> <span class="ow">and</span> <span class="n">rs</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">_pipeline</span> <span class="o">=</span> <span class="n">rs</span><span class="o">.</span><span class="n">pipeline</span><span class="p">()</span>
+                    <span class="n">_config</span> <span class="o">=</span> <span class="n">rs</span><span class="o">.</span><span class="n">config</span><span class="p">()</span>
+                    <span class="n">rs</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">enable_device_from_file</span><span class="p">(</span>
+                        <span class="n">_config</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bag_path</span><span class="p">),</span> <span class="n">repeat_playback</span><span class="o">=</span><span class="kc">False</span>
+                    <span class="p">)</span>
+                    <span class="c1"># Only need colour stream for counting</span>
+                    <span class="n">_config</span><span class="o">.</span><span class="n">enable_stream</span><span class="p">(</span><span class="n">rs</span><span class="o">.</span><span class="n">stream</span><span class="o">.</span><span class="n">color</span><span class="p">)</span>
+                    <span class="n">_profile</span> <span class="o">=</span> <span class="n">_pipeline</span><span class="o">.</span><span class="n">start</span><span class="p">(</span><span class="n">_config</span><span class="p">)</span>
+
+                    <span class="c1"># Run without real-time constraint — as fast as disk allows</span>
+                    <span class="n">_playback</span> <span class="o">=</span> <span class="n">_profile</span><span class="o">.</span><span class="n">get_device</span><span class="p">()</span><span class="o">.</span><span class="n">as_playback</span><span class="p">()</span>
+                    <span class="n">_playback</span><span class="o">.</span><span class="n">set_real_time</span><span class="p">(</span><span class="kc">False</span><span class="p">)</span>
+
+                    <span class="n">bag_frame_count</span> <span class="o">=</span> <span class="mi">0</span>
+                    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+                        <span class="k">try</span><span class="p">:</span>
+                            <span class="n">_frames</span> <span class="o">=</span> <span class="n">_pipeline</span><span class="o">.</span><span class="n">wait_for_frames</span><span class="p">(</span><span class="n">timeout_ms</span><span class="o">=</span><span class="mi">2000</span><span class="p">)</span>
+                            <span class="k">if</span> <span class="n">_frames</span><span class="o">.</span><span class="n">get_color_frame</span><span class="p">():</span>
+                                <span class="n">bag_frame_count</span> <span class="o">+=</span> <span class="mi">1</span>
+                        <span class="k">except</span> <span class="ne">RuntimeError</span><span class="p">:</span>
+                            <span class="c1"># End of file reached</span>
+                            <span class="k">break</span>
+
+                    <span class="k">try</span><span class="p">:</span>
+                        <span class="n">_pipeline</span><span class="o">.</span><span class="n">stop</span><span class="p">()</span>
+                    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+                        <span class="k">pass</span>
+
+                    <span class="n">cam_result</span><span class="p">[</span><span class="s2">&quot;bag_frames&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">bag_frame_count</span>
+                    <span class="n">cam_result</span><span class="p">[</span><span class="s2">&quot;bag_frames_source&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;exact&quot;</span>
+                <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[FrameComparison] BAG playback failed for </span><span class="si">{</span><span class="n">bag_path</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    <span class="n">cam_result</span><span class="p">[</span><span class="s2">&quot;bag_frames&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+                    <span class="n">cam_result</span><span class="p">[</span><span class="s2">&quot;bag_frames_source&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;unavailable&quot;</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">cam_result</span><span class="p">[</span><span class="s2">&quot;bag_frames&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+                <span class="n">cam_result</span><span class="p">[</span><span class="s2">&quot;bag_frames_source&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;realsense_unavailable&quot;</span>
 
         <span class="c1"># Compute difference metrics</span>
         <span class="n">mp4_f</span> <span class="o">=</span> <span class="n">cam_result</span><span class="p">[</span><span class="s2">&quot;mp4_frames&quot;</span><span class="p">]</span>
@@ -1221,21 +1291,67 @@
     <span class="c1"># Cross-camera synchronisation comparison</span>
     <span class="n">cam1_frames</span> <span class="o">=</span> <span class="n">results</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;camera1&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;mp4_frames&quot;</span><span class="p">)</span>
     <span class="n">cam2_frames</span> <span class="o">=</span> <span class="n">results</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;camera2&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;mp4_frames&quot;</span><span class="p">)</span>
+    <span class="n">cam1_bag_frames</span> <span class="o">=</span> <span class="n">results</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;camera1&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;bag_frames&quot;</span><span class="p">)</span>
+    <span class="n">cam2_bag_frames</span> <span class="o">=</span> <span class="n">results</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;camera2&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;bag_frames&quot;</span><span class="p">)</span>
     <span class="n">sync_info</span> <span class="o">=</span> <span class="p">{}</span>
     <span class="k">if</span> <span class="n">cam1_frames</span> <span class="ow">and</span> <span class="n">cam2_frames</span><span class="p">:</span>
+        <span class="n">fps</span> <span class="o">=</span> <span class="n">results</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;camera1&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;fps&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">DEFAULT_FPS</span>
+
         <span class="n">sync_info</span><span class="p">[</span><span class="s2">&quot;cam1_mp4_frames&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cam1_frames</span>
         <span class="n">sync_info</span><span class="p">[</span><span class="s2">&quot;cam2_mp4_frames&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cam2_frames</span>
         <span class="n">sync_info</span><span class="p">[</span><span class="s2">&quot;frame_count_difference&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">abs</span><span class="p">(</span><span class="n">cam1_frames</span> <span class="o">-</span> <span class="n">cam2_frames</span><span class="p">)</span>
-        <span class="n">fps</span> <span class="o">=</span> <span class="n">results</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;camera1&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;fps&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">DEFAULT_FPS</span>
         <span class="n">sync_info</span><span class="p">[</span><span class="s2">&quot;time_offset_seconds&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span>
             <span class="nb">abs</span><span class="p">(</span><span class="n">cam1_frames</span> <span class="o">-</span> <span class="n">cam2_frames</span><span class="p">)</span> <span class="o">/</span> <span class="n">fps</span> <span class="k">if</span> <span class="n">fps</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">3</span>
         <span class="p">)</span>
-        <span class="n">sync_info</span><span class="p">[</span><span class="s2">&quot;in_sync&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sync_info</span><span class="p">[</span><span class="s2">&quot;frame_count_difference&quot;</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="nb">int</span><span class="p">(</span><span class="n">fps</span><span class="p">)</span>  <span class="c1"># within 1 second</span>
+
+        <span class="c1"># BAG-level frame sync (before conversion — more reliable)</span>
+        <span class="k">if</span> <span class="n">cam1_bag_frames</span> <span class="ow">and</span> <span class="n">cam2_bag_frames</span><span class="p">:</span>
+            <span class="n">sync_info</span><span class="p">[</span><span class="s2">&quot;cam1_bag_frames&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cam1_bag_frames</span>
+            <span class="n">sync_info</span><span class="p">[</span><span class="s2">&quot;cam2_bag_frames&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cam2_bag_frames</span>
+            <span class="n">sync_info</span><span class="p">[</span><span class="s2">&quot;bag_frame_count_difference&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">abs</span><span class="p">(</span><span class="n">cam1_bag_frames</span> <span class="o">-</span> <span class="n">cam2_bag_frames</span><span class="p">)</span>
+            <span class="n">sync_info</span><span class="p">[</span><span class="s2">&quot;bag_time_offset_seconds&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span>
+                <span class="nb">abs</span><span class="p">(</span><span class="n">cam1_bag_frames</span> <span class="o">-</span> <span class="n">cam2_bag_frames</span><span class="p">)</span> <span class="o">/</span> <span class="n">fps</span> <span class="k">if</span> <span class="n">fps</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">3</span>
+            <span class="p">)</span>
+
+        <span class="c1"># Inter-camera recording start offset (from metadata — ground truth)</span>
+        <span class="n">inter_offset</span> <span class="o">=</span> <span class="n">results</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;camera1&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;inter_camera_offset_ms&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">inter_offset</span><span class="p">:</span>
+            <span class="n">inter_offset</span> <span class="o">=</span> <span class="n">results</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;camera2&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;inter_camera_offset_ms&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="n">sync_info</span><span class="p">[</span><span class="s2">&quot;recording_start_offset_ms&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">inter_offset</span>
+
+        <span class="c1"># Pipeline restart times per camera</span>
+        <span class="n">sync_info</span><span class="p">[</span><span class="s2">&quot;cam1_pipeline_restart_ms&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">results</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;camera1&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;pipeline_restart_ms&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="n">sync_info</span><span class="p">[</span><span class="s2">&quot;cam2_pipeline_restart_ms&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">results</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;camera2&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;pipeline_restart_ms&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+
+        <span class="c1"># Sync assessment — considers both frame count diff and recording start offset</span>
+        <span class="n">frame_offset_ok</span> <span class="o">=</span> <span class="n">sync_info</span><span class="p">[</span><span class="s2">&quot;frame_count_difference&quot;</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="nb">int</span><span class="p">(</span><span class="n">fps</span><span class="p">)</span>  <span class="c1"># within 1 second</span>
+        <span class="n">start_offset_ok</span> <span class="o">=</span> <span class="n">inter_offset</span> <span class="o">&lt;=</span> <span class="mi">500</span>  <span class="c1"># within 500ms</span>
+        <span class="n">sync_info</span><span class="p">[</span><span class="s2">&quot;in_sync&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">frame_offset_ok</span> <span class="ow">and</span> <span class="n">start_offset_ok</span>
+
+        <span class="c1"># Sync quality level for UI</span>
+        <span class="k">if</span> <span class="n">inter_offset</span> <span class="o">&lt;=</span> <span class="mi">100</span> <span class="ow">and</span> <span class="n">sync_info</span><span class="p">[</span><span class="s2">&quot;frame_count_difference&quot;</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="nb">int</span><span class="p">(</span><span class="n">fps</span> <span class="o">*</span> <span class="mf">0.5</span><span class="p">):</span>
+            <span class="n">sync_info</span><span class="p">[</span><span class="s2">&quot;sync_quality&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;excellent&quot;</span>  <span class="c1"># &lt;100ms offset, &lt;0.5s frame diff</span>
+        <span class="k">elif</span> <span class="n">frame_offset_ok</span> <span class="ow">and</span> <span class="n">start_offset_ok</span><span class="p">:</span>
+            <span class="n">sync_info</span><span class="p">[</span><span class="s2">&quot;sync_quality&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;good&quot;</span>
+        <span class="k">elif</span> <span class="n">frame_offset_ok</span> <span class="ow">or</span> <span class="n">start_offset_ok</span><span class="p">:</span>
+            <span class="n">sync_info</span><span class="p">[</span><span class="s2">&quot;sync_quality&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;fair&quot;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">sync_info</span><span class="p">[</span><span class="s2">&quot;sync_quality&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;poor&quot;</span>
+
+        <span class="c1"># Warning if bags themselves weren&#39;t synced (impacts MP4 sync too)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">start_offset_ok</span><span class="p">:</span>
+            <span class="n">sync_info</span><span class="p">[</span><span class="s2">&quot;warning&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Cameras started </span><span class="si">{</span><span class="n">inter_offset</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2">ms apart. &quot;</span>
+                <span class="s2">&quot;MP4 files inherit this offset — they cannot be more synced than the source BAGs. &quot;</span>
+                <span class="s2">&quot;No hardware sync cable available.&quot;</span>
+            <span class="p">)</span>
 
     <span class="k">return</span> <span class="p">{</span>
         <span class="s2">&quot;batch_id&quot;</span><span class="p">:</span> <span class="n">batch_id</span><span class="p">,</span>
         <span class="s2">&quot;cameras&quot;</span><span class="p">:</span> <span class="n">results</span><span class="p">,</span>
-        <span class="s2">&quot;sync&quot;</span><span class="p">:</span> <span class="n">sync_info</span><span class="p">,</span>
+        <span class="c1"># None (→ JSON null) when only one camera exists so the frontend</span>
+        <span class="c1"># can distinguish &quot;no sync possible&quot; from &quot;sync computed&quot;.</span>
+        <span class="s2">&quot;sync&quot;</span><span class="p">:</span> <span class="n">sync_info</span> <span class="k">if</span> <span class="n">sync_info</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">}</span>
 
 
@@ -1304,7 +1420,10 @@
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;/videos/</span><span class="si">{video_name}</span><span class="s2">/metadata&quot;</span><span class="p">)</span>
 <span class="k">def</span><span class="w"> </span><span class="nf">get_video_metadata</span><span class="p">(</span><span class="n">video_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;Read video metadata from sidecar JSON or embedded ffprobe tags.&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Read video metadata from sidecar JSON or embedded ffprobe tags.</span>
+<span class="sd">    Fallback logic for FPS: Metadata -&gt; Container (MP4/BAG) -&gt; Default.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
     <span class="n">video_path</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="n">video_name</span>
 
     <span class="k">if</span> <span class="ow">not</span> <span class="n">video_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
@@ -1314,48 +1433,76 @@
     <span class="n">metadata_file</span> <span class="o">=</span> <span class="n">video_name</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;.mp4&#39;</span><span class="p">,</span> <span class="s1">&#39;_metadata.json&#39;</span><span class="p">)</span>
     <span class="n">metadata_path</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="n">metadata_file</span>
 
+    <span class="n">result_metadata</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;patient_name&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;patient_id&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;comment&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;recorded_at&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;camera_view&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;fps&quot;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span>
+        <span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;none&quot;</span>
+    <span class="p">}</span>
+
+    <span class="c1"># 1. Try Sidecar</span>
     <span class="k">if</span> <span class="n">metadata_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
         <span class="k">try</span><span class="p">:</span>
             <span class="n">data</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">metadata_path</span><span class="o">.</span><span class="n">read_text</span><span class="p">())</span>
-            <span class="k">return</span> <span class="p">{</span>
+            <span class="n">result_metadata</span><span class="o">.</span><span class="n">update</span><span class="p">({</span>
                 <span class="s2">&quot;patient_name&quot;</span><span class="p">:</span> <span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;patient_name&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">),</span>
                 <span class="s2">&quot;patient_id&quot;</span><span class="p">:</span> <span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;patient_id&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">),</span>
                 <span class="s2">&quot;comment&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;Patient: </span><span class="si">{</span><span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;patient_name&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2"> | ID: </span><span class="si">{</span><span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;patient_id&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
                 <span class="s2">&quot;recorded_at&quot;</span><span class="p">:</span> <span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;recorded_at&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">),</span>
-                <span class="s2">&quot;camera_view&quot;</span><span class="p">:</span> <span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;camera_view&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">),</span>  <span class="c1"># &quot;Front&quot; or &quot;Side&quot;</span>
-                <span class="s2">&quot;fps&quot;</span><span class="p">:</span> <span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;fps&#39;</span><span class="p">,</span> <span class="n">DEFAULT_FPS</span><span class="p">),</span>          <span class="c1"># Recording FPS for frame-accurate display</span>
+                <span class="s2">&quot;camera_view&quot;</span><span class="p">:</span> <span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;camera_view&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">),</span>
+                <span class="s2">&quot;fps&quot;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;fps&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)),</span>
                 <span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;sidecar&quot;</span>
-            <span class="p">}</span>
+            <span class="p">})</span>
         <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
             <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Metadata] Error reading sidecar: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 
-    <span class="c1"># Fallback to ffprobe</span>
-    <span class="k">try</span><span class="p">:</span>
-        <span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
-        <span class="n">ffmpeg_path</span> <span class="o">=</span> <span class="n">imageio_ffmpeg</span><span class="o">.</span><span class="n">get_ffmpeg_exe</span><span class="p">()</span>
-        <span class="n">ffmpeg_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">ffmpeg_path</span><span class="p">)</span>
-        <span class="n">ffprobe_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">ffmpeg_dir</span><span class="p">,</span> <span class="s1">&#39;ffprobe.exe&#39;</span> <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="s1">&#39;nt&#39;</span> <span class="k">else</span> <span class="s1">&#39;ffprobe&#39;</span><span class="p">)</span>
+    <span class="c1"># 2. Fallback to FFprobe if no sidecar data found</span>
+    <span class="k">if</span> <span class="n">result_metadata</span><span class="p">[</span><span class="s2">&quot;source&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;none&quot;</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+            <span class="n">ffmpeg_path</span> <span class="o">=</span> <span class="n">imageio_ffmpeg</span><span class="o">.</span><span class="n">get_ffmpeg_exe</span><span class="p">()</span>
+            <span class="n">ffmpeg_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">ffmpeg_path</span><span class="p">)</span>
+            <span class="n">ffprobe_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">ffmpeg_dir</span><span class="p">,</span> <span class="s1">&#39;ffprobe.exe&#39;</span> <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="s1">&#39;nt&#39;</span> <span class="k">else</span> <span class="s1">&#39;ffprobe&#39;</span><span class="p">)</span>
 
-        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">ffprobe_path</span><span class="p">):</span>
-            <span class="n">result</span> <span class="o">=</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">run</span><span class="p">([</span>
-                <span class="n">ffprobe_path</span><span class="p">,</span> <span class="s1">&#39;-v&#39;</span><span class="p">,</span> <span class="s1">&#39;quiet&#39;</span><span class="p">,</span> <span class="s1">&#39;-print_format&#39;</span><span class="p">,</span> <span class="s1">&#39;json&#39;</span><span class="p">,</span> <span class="s1">&#39;-show_format&#39;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">video_path</span><span class="p">)</span>
-            <span class="p">],</span> <span class="n">capture_output</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">text</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">ffprobe_path</span><span class="p">):</span>
+                <span class="n">result</span> <span class="o">=</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">run</span><span class="p">([</span>
+                    <span class="n">ffprobe_path</span><span class="p">,</span> <span class="s1">&#39;-v&#39;</span><span class="p">,</span> <span class="s1">&#39;quiet&#39;</span><span class="p">,</span> <span class="s1">&#39;-print_format&#39;</span><span class="p">,</span> <span class="s1">&#39;json&#39;</span><span class="p">,</span> <span class="s1">&#39;-show_format&#39;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">video_path</span><span class="p">)</span>
+                <span class="p">],</span> <span class="n">capture_output</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">text</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
 
-            <span class="k">if</span> <span class="n">result</span><span class="o">.</span><span class="n">returncode</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
-                <span class="n">data</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">stdout</span><span class="p">)</span>
-                <span class="n">tags</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;format&#39;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;tags&#39;</span><span class="p">,</span> <span class="p">{})</span>
-                <span class="k">return</span> <span class="p">{</span>
-                    <span class="s2">&quot;patient_name&quot;</span><span class="p">:</span> <span class="n">tags</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;title&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">),</span>
-                    <span class="s2">&quot;patient_id&quot;</span><span class="p">:</span> <span class="n">tags</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;artist&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">),</span>
-                    <span class="s2">&quot;comment&quot;</span><span class="p">:</span> <span class="n">tags</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;comment&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">),</span>
-                    <span class="s2">&quot;duration&quot;</span><span class="p">:</span> <span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;format&#39;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;duration&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">),</span>
-                    <span class="s2">&quot;camera_view&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
-                    <span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;embedded&quot;</span>
-                <span class="p">}</span>
+                <span class="k">if</span> <span class="n">result</span><span class="o">.</span><span class="n">returncode</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">data</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">stdout</span><span class="p">)</span>
+                    <span class="n">tags</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;format&#39;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;tags&#39;</span><span class="p">,</span> <span class="p">{})</span>
+                    <span class="n">result_metadata</span><span class="o">.</span><span class="n">update</span><span class="p">({</span>
+                        <span class="s2">&quot;patient_name&quot;</span><span class="p">:</span> <span class="n">tags</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;title&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">),</span>
+                        <span class="s2">&quot;patient_id&quot;</span><span class="p">:</span> <span class="n">tags</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;artist&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">),</span>
+                        <span class="s2">&quot;comment&quot;</span><span class="p">:</span> <span class="n">tags</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;comment&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">),</span>
+                        <span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;embedded&quot;</span>
+                    <span class="p">})</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Metadata] Error reading embedded tags: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 
-        <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;patient_name&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;patient_id&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;comment&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;camera_view&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;none&quot;</span><span class="p">}</span>
-    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-        <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;error&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)}</span>
+    <span class="c1"># 3. FPS Fallback: If missing/invalid, try reading from container via OpenCV</span>
+    <span class="k">if</span> <span class="n">result_metadata</span><span class="p">[</span><span class="s2">&quot;fps&quot;</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">cap</span> <span class="o">=</span> <span class="n">cv2</span><span class="o">.</span><span class="n">VideoCapture</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">video_path</span><span class="p">))</span>
+            <span class="k">if</span> <span class="n">cap</span><span class="o">.</span><span class="n">isOpened</span><span class="p">():</span>
+                <span class="n">cap_fps</span> <span class="o">=</span> <span class="n">cap</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cv2</span><span class="o">.</span><span class="n">CAP_PROP_FPS</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">cap_fps</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">result_metadata</span><span class="p">[</span><span class="s2">&quot;fps&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cap_fps</span>
+                <span class="n">cap</span><span class="o">.</span><span class="n">release</span><span class="p">()</span>
+        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+            <span class="k">pass</span>
+
+    <span class="c1"># 4. Final FPS Default</span>
+    <span class="k">if</span> <span class="n">result_metadata</span><span class="p">[</span><span class="s2">&quot;fps&quot;</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">result_metadata</span><span class="p">[</span><span class="s2">&quot;fps&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">DEFAULT_FPS</span>
+
+    <span class="k">return</span> <span class="n">result_metadata</span>
+
+
 
 
 <span class="c1"># =============================================================================</span>
@@ -1505,6 +1652,80 @@
 
 
 <span class="c1"># =============================================================================</span>
+<span class="c1">#                        CONVERSION ROUTES</span>
+<span class="c1"># =============================================================================</span>
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="s2">&quot;/conversion/start&quot;</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">start_conversion</span><span class="p">(</span><span class="n">data</span><span class="p">:</span> <span class="n">ConversionStartRequest</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Start BAG→MP4 conversion for a batch.</span>
+
+<span class="sd">    Both cameras of the batch are converted in parallel. Batches are sequential</span>
+<span class="sd">    (only one batch can convert at a time per job). Uses h264_nvenc on Jetson</span>
+<span class="sd">    (NVENC hardware encoder), falls back to libx264 if unavailable.</span>
+
+<span class="sd">    Set force=True to re-convert even if an MP4 already exists.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">batch_id</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">batch_id</span>
+
+    <span class="n">camera1_bag</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">batch_id</span><span class="si">}</span><span class="s2">_camera1.bag&quot;</span>
+    <span class="n">camera2_bag</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">batch_id</span><span class="si">}</span><span class="s2">_camera2.bag&quot;</span>
+    <span class="n">has_cam1</span> <span class="o">=</span> <span class="n">camera1_bag</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span>
+    <span class="n">has_cam2</span> <span class="o">=</span> <span class="n">camera2_bag</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">has_cam1</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">has_cam2</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;success&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;message&quot;</span><span class="p">:</span> <span class="s2">&quot;No BAG files found for this batch&quot;</span><span class="p">}</span>
+
+    <span class="n">is_converting</span><span class="p">,</span> <span class="n">existing_job_id</span> <span class="o">=</span> <span class="n">is_batch_converting</span><span class="p">(</span><span class="n">batch_id</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">is_converting</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s2">&quot;success&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;message&quot;</span><span class="p">:</span> <span class="s2">&quot;Batch already being converted&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;job_id&quot;</span><span class="p">:</span> <span class="n">existing_job_id</span>
+        <span class="p">}</span>
+
+    <span class="n">job_id</span> <span class="o">=</span> <span class="n">create_conversion_job</span><span class="p">(</span><span class="n">batch_id</span><span class="p">,</span> <span class="n">has_cam1</span><span class="p">,</span> <span class="n">has_cam2</span><span class="p">,</span> <span class="n">force</span><span class="o">=</span><span class="n">data</span><span class="o">.</span><span class="n">force</span><span class="p">)</span>
+    <span class="n">is_orphan</span> <span class="o">=</span> <span class="p">(</span><span class="n">has_cam1</span> <span class="ow">or</span> <span class="n">has_cam2</span><span class="p">)</span> <span class="ow">and</span> <span class="ow">not</span> <span class="p">(</span><span class="n">has_cam1</span> <span class="ow">and</span> <span class="n">has_cam2</span><span class="p">)</span>
+
+    <span class="n">t</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">(</span>
+        <span class="n">target</span><span class="o">=</span><span class="n">convert_bag_to_mp4</span><span class="p">,</span>
+        <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">job_id</span><span class="p">,</span> <span class="n">batch_id</span><span class="p">,</span> <span class="n">has_cam1</span><span class="p">,</span> <span class="n">has_cam2</span><span class="p">),</span>
+        <span class="n">daemon</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">t</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s2">&quot;success&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+        <span class="s2">&quot;message&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;Conversion started (</span><span class="si">{</span><span class="s1">&#39;orphan&#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">is_orphan</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;both cameras&#39;</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;job_id&quot;</span><span class="p">:</span> <span class="n">job_id</span><span class="p">,</span>
+        <span class="s2">&quot;is_orphan&quot;</span><span class="p">:</span> <span class="n">is_orphan</span><span class="p">,</span>
+    <span class="p">}</span>
+
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;/conversion/status/</span><span class="si">{job_id}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_conversion_status</span><span class="p">(</span><span class="n">job_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get conversion job status.&quot;&quot;&quot;</span>
+    <span class="n">job</span> <span class="o">=</span> <span class="n">get_conversion_job</span><span class="p">(</span><span class="n">job_id</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">job</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;success&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;message&quot;</span><span class="p">:</span> <span class="s2">&quot;Job not found&quot;</span><span class="p">}</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;success&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;job&quot;</span><span class="p">:</span> <span class="n">job</span><span class="p">}</span>
+
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="s2">&quot;/conversion/cancel/</span><span class="si">{job_id}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">cancel_conversion</span><span class="p">(</span><span class="n">job_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Cancel a conversion job.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">cancel_conversion_job</span><span class="p">(</span><span class="n">job_id</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;success&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;message&quot;</span><span class="p">:</span> <span class="s2">&quot;Conversion cancelled&quot;</span><span class="p">}</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;success&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;message&quot;</span><span class="p">:</span> <span class="s2">&quot;Job not found&quot;</span><span class="p">}</span>
+
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;/conversion/jobs&quot;</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">list_conversion_jobs</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;List all conversion jobs.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;jobs&quot;</span><span class="p">:</span> <span class="n">get_all_conversion_jobs</span><span class="p">()}</span>
+
+
+<span class="c1"># =============================================================================</span>
 <span class="c1">#                        FILE MANAGEMENT ROUTES</span>
 <span class="c1"># =============================================================================</span>
 
@@ -1542,6 +1763,8 @@
                     <span class="s2">&quot;camera2_hq_size&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
                     <span class="s2">&quot;camera1_mp4_size&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
                     <span class="s2">&quot;camera2_mp4_size&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+                    <span class="s2">&quot;camera1_has_mp4&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+                    <span class="s2">&quot;camera2_has_mp4&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
                     <span class="s2">&quot;camera1_bag_name&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
                     <span class="s2">&quot;camera2_bag_name&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
                     <span class="s2">&quot;camera1_type&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
@@ -1553,10 +1776,11 @@
             <span class="n">mtime</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">fromtimestamp</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_mtime</span><span class="p">)</span><span class="o">.</span><span class="n">isoformat</span><span class="p">()</span>
 
             <span class="n">mp4_path</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">.mp4&quot;</span>
-            <span class="n">mp4_size</span> <span class="o">=</span> <span class="n">mp4_path</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span> <span class="k">if</span> <span class="n">mp4_path</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="k">else</span> <span class="mi">0</span>
+            <span class="n">mp4_exists</span> <span class="o">=</span> <span class="n">mp4_path</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span>
+            <span class="n">mp4_size</span> <span class="o">=</span> <span class="n">mp4_path</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span> <span class="k">if</span> <span class="n">mp4_exists</span> <span class="k">else</span> <span class="mi">0</span>
 
             <span class="n">file_info</span> <span class="o">=</span> <span class="p">{</span>
-                <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="n">mp4_path</span><span class="o">.</span><span class="n">name</span> <span class="k">if</span> <span class="n">mp4_path</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="k">else</span> <span class="n">f</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
+                <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="n">mp4_path</span><span class="o">.</span><span class="n">name</span> <span class="k">if</span> <span class="n">mp4_exists</span> <span class="k">else</span> <span class="n">f</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
                 <span class="s2">&quot;size&quot;</span><span class="p">:</span> <span class="n">hq_size</span> <span class="o">+</span> <span class="n">mp4_size</span>
             <span class="p">}</span>
 
@@ -1565,6 +1789,7 @@
                 <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;camera1_size&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">hq_size</span> <span class="o">+</span> <span class="n">mp4_size</span>
                 <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;camera1_hq_size&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">hq_size</span>
                 <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;camera1_mp4_size&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">mp4_size</span>
+                <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;camera1_has_mp4&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">mp4_exists</span>
                 <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;camera1_bag_name&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">name</span>
                 <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;camera1_type&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">CAMERA_TYPE_REALSENSE</span>
             <span class="k">elif</span> <span class="n">camera_num</span> <span class="o">==</span> <span class="s2">&quot;2&quot;</span><span class="p">:</span>
@@ -1572,11 +1797,31 @@
                 <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;camera2_size&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">hq_size</span> <span class="o">+</span> <span class="n">mp4_size</span>
                 <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;camera2_hq_size&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">hq_size</span>
                 <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;camera2_mp4_size&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">mp4_size</span>
+                <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;camera2_has_mp4&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">mp4_exists</span>
                 <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;camera2_bag_name&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">name</span>
                 <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;camera2_type&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">CAMERA_TYPE_REALSENSE</span>
 
             <span class="k">if</span> <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;modified&quot;</span><span class="p">]</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">mtime</span> <span class="o">&gt;</span> <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;modified&quot;</span><span class="p">]:</span>
                 <span class="n">batches</span><span class="p">[</span><span class="n">batch_id</span><span class="p">][</span><span class="s2">&quot;modified&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">mtime</span>
+
+    <span class="c1"># Enrich each batch with patient metadata from sidecar JSON</span>
+    <span class="k">for</span> <span class="n">batch_id</span><span class="p">,</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">batches</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">meta_path</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">batch_id</span><span class="si">}</span><span class="s2">_camera1_metadata.json&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">meta_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="n">meta_path</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">batch_id</span><span class="si">}</span><span class="s2">_camera2_metadata.json&quot;</span>
+
+        <span class="n">batch</span><span class="p">[</span><span class="s2">&quot;patient_name&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+        <span class="n">batch</span><span class="p">[</span><span class="s2">&quot;patient_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+        <span class="n">batch</span><span class="p">[</span><span class="s2">&quot;recorded_at&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+
+        <span class="k">if</span> <span class="n">meta_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">meta</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">meta_path</span><span class="o">.</span><span class="n">read_text</span><span class="p">())</span>
+                <span class="n">batch</span><span class="p">[</span><span class="s2">&quot;patient_name&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;patient_name&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+                <span class="n">batch</span><span class="p">[</span><span class="s2">&quot;patient_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;patient_id&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+                <span class="n">batch</span><span class="p">[</span><span class="s2">&quot;recorded_at&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;recorded_at&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+                <span class="k">pass</span>
 
     <span class="n">result</span><span class="p">[</span><span class="s2">&quot;videos&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">batches</span><span class="o">.</span><span class="n">values</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="s2">&quot;modified&quot;</span><span class="p">]</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">reverse</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 

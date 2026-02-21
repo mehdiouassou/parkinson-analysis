@@ -3,10 +3,10 @@
   <head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="API: Processing (YOLOv8 &amp; Motion)" href="processing.html"><link rel="prev" title="Parkinson Analysis" href="../index.html">
+<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="Camera Interface" href="camera.html"><link rel="prev" title="Parkinson Analysis" href="../index.html">
 
     <!-- Generated with Sphinx 8.1.3 and Furo 2025.12.19 -->
-        <title>API: Main Application (FastAPI) - Parkinson Analysis 1.0.0 documentation</title>
+        <title>Main Application (FastAPI) - Parkinson Analysis 1.0.0 documentation</title>
       <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
@@ -192,12 +192,13 @@
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
   <p class="caption" role="heading"><span class="caption-text">Backend</span></p>
 <ul class="current">
-<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">API: Main Application (FastAPI)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="processing.html">API: Processing (YOLOv8 &amp; Motion)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="camera.html">API: Camera Interface (RealSense/Bag)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="config.html">API: Configuration</a></li>
-<li class="toctree-l1"><a class="reference internal" href="models.html">API: Data Models (Pydantic)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="writers.html">API: Writers (Video &amp; Data)</a></li>
+<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">Main Application (FastAPI)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="camera.html">Camera Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="config.html">Configuration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="conversion.html">Conversion Pipeline</a></li>
+<li class="toctree-l1"><a class="reference internal" href="processing.html">Processing Pipeline (YOLOv8)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="models.html">Data Models (Pydantic)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="writers.html">Writers</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">Frontend</span></p>
 <ul>
@@ -243,18 +244,65 @@
           </label>
         </div>
         <article role="main" id="furo-main-content">
-          <section id="api-main-application-fastapi">
-<h1>API: Main Application (FastAPI)<a class="headerlink" href="#api-main-application-fastapi" title="Link to this heading">¶</a></h1>
-<p>Main FastAPI application. Defines all routes for camera control, recording, processing, and file management.</p>
+          <section id="main-application-fastapi">
+<h1>Main Application (FastAPI)<a class="headerlink" href="#main-application-fastapi" title="Link to this heading">¶</a></h1>
+<p>The main FastAPI app. Defines all HTTP routes and wires together the recording state machine,
+MJPEG streaming, conversion triggers and file management endpoints.</p>
+<section id="key-concepts">
+<h2>Key concepts<a class="headerlink" href="#key-concepts" title="Link to this heading">¶</a></h2>
+<p><strong>Recording state machine</strong>: <code class="docutils literal notranslate"><span class="pre">idle</span> <span class="pre">-&gt;</span> <span class="pre">warming_up</span> <span class="pre">-&gt;</span> <span class="pre">recording</span> <span class="pre">-&gt;</span> <span class="pre">paused</span> <span class="pre">-&gt;</span> <span class="pre">idle</span></code>.
+State is tracked in a dict protected by a threading lock. Both cameras start and stop
+in parallel threads to minimize inter camera offset.</p>
+<p><strong>MJPEG streaming</strong>: each camera has a generator (<code class="docutils literal notranslate"><span class="pre">gen_frames</span></code>) that reads the latest
+captured frame, JPEG encodes it and yields it as multipart data. FPS is throttled to
+30fps idle, 15fps during recording to save CPU and USB bandwidth on the Jetson.</p>
+<p><strong>Sync tracking</strong>: <code class="docutils literal notranslate"><span class="pre">time.monotonic()</span></code> timestamps are captured around pipeline restart
+during record start. The inter camera offset is computed and stored in metadata sidecars.</p>
+<p><strong>Pause/Resume</strong>: calls the RealSense SDK recorder <code class="docutils literal notranslate"><span class="pre">pause()</span></code>/<code class="docutils literal notranslate"><span class="pre">resume()</span></code> on all
+active cameras so the BAG file doesnt contain dead frames during pauses.</p>
+</section>
+<section id="routes-overview">
+<h2>Routes overview<a class="headerlink" href="#routes-overview" title="Link to this heading">¶</a></h2>
+<dl class="simple">
+<dt>Recording:</dt><dd><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/recording/start</span></code> — start recording with warmup</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/recording/stop</span></code> — stop and save</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/recording/pause</span></code> — pause BAG writing on all cameras</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/recording/resume</span></code> — resume BAG writing</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/recording/status</span></code> — live metrics</p></li>
+</ul>
+</dd>
+<dt>Camera management:</dt><dd><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/camera/{id}</span></code> — MJPEG stream</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/cameras/info</span></code> — detected cameras</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/cameras/refresh</span></code> — re detect cameras</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/cameras/swap</span></code> — swap logical camera mapping</p></li>
+</ul>
+</dd>
+<dt>Quality analysis:</dt><dd><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/recordings/frame-comparison/{batch_id}</span></code> — sync analysis, drop rates, start offset</p></li>
+</ul>
+</dd>
+<dt>File management:</dt><dd><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/recordings/batches</span></code> — list batch pairs</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/files/all</span></code> — all files organized by type</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">DELETE</span> <span class="pre">/files/video/{batch_id}</span></code> — delete batch</p></li>
+</ul>
+</dd>
+</dl>
+</section>
+<section id="module-main">
+<span id="api-reference"></span><h2>API reference<a class="headerlink" href="#module-main" title="Link to this heading">¶</a></h2>
 <section id="parkinson-analysis-api">
-<span id="module-main"></span><h2>Parkinson Analysis API<a class="headerlink" href="#parkinson-analysis-api" title="Link to this heading">¶</a></h2>
+<h3>Parkinson Analysis API<a class="headerlink" href="#parkinson-analysis-api" title="Link to this heading">¶</a></h3>
 <p>FastAPI backend for the Parkinson Analysis dual-camera recording and processing pipeline.</p>
 <dl class="simple">
 <dt>Modules:</dt><dd><p>config.py      - Configuration, constants, and camera detection
 models.py      - Pydantic request/response models
 camera.py      - Camera source abstraction (RealSense, .bag)
 writers.py     - Video writers (BAG, MP4, FFmpeg)
-processing.py  - Video processing and analysis pipeline</p>
+processing.py  - Video processing and analysis pipeline
+conversion.py  - Post-recording BAG→MP4 conversion pipeline</p>
 </dd>
 <dt>Camera Modes (set via CAMERA_MODE env var):</dt><dd><p>auto           - Auto-detect RealSense cameras (DEFAULT)
 mock_bag       - RealSense .bag file playback (for dev)
@@ -262,8 +310,8 @@ realsense      - Live RealSense cameras (force RealSense)</p>
 </dd>
 <dt>Recording Behavior:</dt><dd><dl class="simple">
 <dt>RealSense cameras:</dt><dd><ul class="simple">
-<li><p>.bag file (depth + RGB) for processing</p></li>
-<li><p>.mp4 file (RGB only) for viewing/tagging</p></li>
+<li><p>.bag file (depth + RGB) only — zero-drop, SDK-managed</p></li>
+<li><p>.mp4 is generated post-recording via the Conversion page</p></li>
 </ul>
 </dd>
 </dl>
@@ -274,6 +322,12 @@ If only one camera is connected, only camera1 files are recorded.</p>
 </dd>
 </dl>
 </section>
+<dl class="py function">
+<dt class="sig sig-object py" id="main.cancel_conversion">
+<span class="sig-prename descclassname"><span class="pre">main.</span></span><span class="sig-name descname"><span class="pre">cancel_conversion</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">job_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#main.cancel_conversion" title="Link to this definition">¶</a></dt>
+<dd><p>Cancel a conversion job.</p>
+</dd></dl>
+
 <dl class="py function">
 <dt class="sig sig-object py" id="main.cancel_processing">
 <span class="sig-prename descclassname"><span class="pre">main.</span></span><span class="sig-name descname"><span class="pre">cancel_processing</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">job_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#main.cancel_processing" title="Link to this definition">¶</a></dt>
@@ -342,6 +396,10 @@ If only one camera is connected, only camera1 files are recorded.</p>
 <dt>Handles:</dt><dd><ul class="simple">
 <li><p>Reading frames from camera source (via physical ID after swap)</p></li>
 <li><p>JPEG encoding for streaming</p></li>
+<li><p>FPS throttling: 30 fps idle, 15 fps during recording to save
+CPU/bandwidth on Jetson AGX Orin with dual RealSense cameras</p></li>
+<li><p>Graceful stream termination when camera goes offline so the browser
+fires onError and the frontend can retry with exponential back-off.</p></li>
 </ul>
 </dd>
 </dl>
@@ -359,6 +417,12 @@ If only one camera is connected, only camera1 files are recorded.</p>
 <dt class="sig sig-object py" id="main.get_cameras_swap_state">
 <span class="sig-prename descclassname"><span class="pre">main.</span></span><span class="sig-name descname"><span class="pre">get_cameras_swap_state</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#main.get_cameras_swap_state" title="Link to this definition">¶</a></dt>
 <dd><p>Return the current camera swap state.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="main.get_conversion_status">
+<span class="sig-prename descclassname"><span class="pre">main.</span></span><span class="sig-name descname"><span class="pre">get_conversion_status</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">job_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#main.get_conversion_status" title="Link to this definition">¶</a></dt>
+<dd><p>Get conversion job status.</p>
 </dd></dl>
 
 <dl class="py function">
@@ -400,8 +464,7 @@ Logical 1 → camera2 files (Side/Frontale)</p>
 <dd class="field-odd"><p>idle | warming_up | recording | paused
 duration:          seconds elapsed since recording started (None during warm-up)
 warmup_remaining:  seconds left in warm-up countdown (None when not warming up)
-frame_counts:      dict of camera_id -&gt; frames written to MP4
-current_filenames: dict of “camN_mp4/bag” -&gt; filename (populated after warm-up)</p>
+current_filenames: dict of “camN_bag” -&gt; filename (populated after warm-up)</p>
 </dd>
 <dt class="field-even">Return type<span class="colon">:</span></dt>
 <dd class="field-even"><p>status</p>
@@ -426,7 +489,8 @@ without downloading the entire file first.</p>
 <dl class="py function">
 <dt class="sig sig-object py" id="main.get_video_metadata">
 <span class="sig-prename descclassname"><span class="pre">main.</span></span><span class="sig-name descname"><span class="pre">get_video_metadata</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">video_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#main.get_video_metadata" title="Link to this definition">¶</a></dt>
-<dd><p>Read video metadata from sidecar JSON or embedded ffprobe tags.</p>
+<dd><p>Read video metadata from sidecar JSON or embedded ffprobe tags.
+Fallback logic for FPS: Metadata -&gt; Container (MP4/BAG) -&gt; Default.</p>
 </dd></dl>
 
 <dl class="py function">
@@ -452,6 +516,12 @@ Preview file: .mp4</p>
 </dd></dl>
 
 <dl class="py function">
+<dt class="sig sig-object py" id="main.list_conversion_jobs">
+<span class="sig-prename descclassname"><span class="pre">main.</span></span><span class="sig-name descname"><span class="pre">list_conversion_jobs</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#main.list_conversion_jobs" title="Link to this definition">¶</a></dt>
+<dd><p>List all conversion jobs.</p>
+</dd></dl>
+
+<dl class="py function">
 <dt class="sig sig-object py" id="main.list_processing_jobs">
 <span class="sig-prename descclassname"><span class="pre">main.</span></span><span class="sig-name descname"><span class="pre">list_processing_jobs</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#main.list_processing_jobs" title="Link to this definition">¶</a></dt>
 <dd><p>List all processing jobs.</p>
@@ -466,20 +536,25 @@ Preview file: .mp4</p>
 <dl class="py function">
 <dt class="sig sig-object py" id="main.pause_recording">
 <span class="sig-prename descclassname"><span class="pre">main.</span></span><span class="sig-name descname"><span class="pre">pause_recording</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#main.pause_recording" title="Link to this definition">¶</a></dt>
-<dd><p>Pause recording.</p>
+<dd><p>Pause recording — pauses BAG writing on all active cameras.</p>
+<p>The RealSense pipeline stays running (MJPEG streaming continues)
+but frames are no longer written to disk. This gives a true pause
+so the resulting BAG has no gap/filler frames.</p>
 </dd></dl>
 
 <dl class="py function">
 <dt class="sig sig-object py" id="main.refresh_cameras">
 <span class="sig-prename descclassname"><span class="pre">main.</span></span><span class="sig-name descname"><span class="pre">refresh_cameras</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#main.refresh_cameras" title="Link to this definition">¶</a></dt>
-<dd><p>Force re-detection of cameras.</p>
-<p>Call this if you’ve plugged in or unplugged cameras.</p>
+<dd><p>Force re-detection of cameras.
+Call this if you’ve plugged in or unplugged cameras.</p>
 </dd></dl>
 
 <dl class="py function">
 <dt class="sig sig-object py" id="main.resume_recording">
 <span class="sig-prename descclassname"><span class="pre">main.</span></span><span class="sig-name descname"><span class="pre">resume_recording</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#main.resume_recording" title="Link to this definition">¶</a></dt>
-<dd><p>Resume recording.</p>
+<dd><p>Resume recording — resumes BAG writing on all active cameras.</p>
+<p>Both cameras are resumed in parallel to minimise inter-camera
+resume offset.</p>
 </dd></dl>
 
 <dl class="py function">
@@ -492,6 +567,16 @@ Preview file: .mp4</p>
 <dt class="sig sig-object py" id="main.shutdown">
 <span class="sig-prename descclassname"><span class="pre">main.</span></span><span class="sig-name descname"><span class="pre">shutdown</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#main.shutdown" title="Link to this definition">¶</a></dt>
 <dd><p>Clean up resources on shutdown.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="main.start_conversion">
+<span class="sig-prename descclassname"><span class="pre">main.</span></span><span class="sig-name descname"><span class="pre">start_conversion</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="models.html#models.ConversionStartRequest" title="models.ConversionStartRequest"><span class="pre">ConversionStartRequest</span></a></span></em><span class="sig-paren">)</span><a class="headerlink" href="#main.start_conversion" title="Link to this definition">¶</a></dt>
+<dd><p>Start BAG→MP4 conversion for a batch.</p>
+<p>Both cameras of the batch are converted in parallel. Batches are sequential
+(only one batch can convert at a time per job). Uses h264_nvenc on Jetson
+(NVENC hardware encoder), falls back to libx264 if unavailable.</p>
+<p>Set force=True to re-convert even if an MP4 already exists.</p>
 </dd></dl>
 
 <dl class="py function">
@@ -514,11 +599,11 @@ only the other camera is recorded (orphan mode).</p>
 <dl class="py function">
 <dt class="sig sig-object py" id="main.stop_recording">
 <span class="sig-prename descclassname"><span class="pre">main.</span></span><span class="sig-name descname"><span class="pre">stop_recording</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#main.stop_recording" title="Link to this definition">¶</a></dt>
-<dd><p>Stop recording and save files with metadata sidecars.</p>
-<p>RealSense cameras produce: .bag + .mp4
-If called during warm-up, cancels the warm-up before any writers are created.
-BAG and MP4 pipelines for both cameras are stopped in parallel to minimise
+<dd><p>Stop recording and save BAG files with metadata sidecars.</p>
+<p>If called during warm-up, cancels before any writers are created.
+BAG pipelines for both cameras are stopped in parallel to minimise
 the inter-camera stop-time offset.</p>
+<p>MP4 files are NOT created here — use the Conversion page post-recording.</p>
 </dd></dl>
 
 <dl class="py function">
@@ -537,6 +622,9 @@ Recordings are always saved with logical naming:</p>
 <dt class="sig sig-object py" id="main.video_feed">
 <span class="sig-prename descclassname"><span class="pre">main.</span></span><span class="sig-name descname"><span class="pre">video_feed</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">camera_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#main.video_feed" title="Link to this definition">¶</a></dt>
 <dd><p>Stream MJPEG video from camera 0 or 1.</p>
+<p>Returns HTTP 503 when the camera is not yet running so the browser’s
+&lt;img&gt; onError fires immediately and the frontend can retry with
+exponential back-off without keeping a long-lived connection alive.</p>
 </dd></dl>
 
 <dl class="py function">
@@ -546,18 +634,19 @@ Recordings are always saved with logical naming:</p>
 </dd></dl>
 
 </section>
+</section>
 
         </article>
       </div>
       <footer>
         
         <div class="related-pages">
-          <a class="next-page" href="processing.html">
+          <a class="next-page" href="camera.html">
               <div class="page-info">
                 <div class="context">
                   <span>Next</span>
                 </div>
-                <div class="title">API: Processing (YOLOv8 &amp; Motion)</div>
+                <div class="title">Camera Interface</div>
               </div>
               <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
             </a>
@@ -602,8 +691,12 @@ Recordings are always saved with logical naming:</p>
         <div class="toc-tree-container">
           <div class="toc-tree">
             <ul>
-<li><a class="reference internal" href="#">API: Main Application (FastAPI)</a><ul>
+<li><a class="reference internal" href="#">Main Application (FastAPI)</a><ul>
+<li><a class="reference internal" href="#key-concepts">Key concepts</a></li>
+<li><a class="reference internal" href="#routes-overview">Routes overview</a></li>
+<li><a class="reference internal" href="#module-main">API reference</a><ul>
 <li><a class="reference internal" href="#parkinson-analysis-api">Parkinson Analysis API</a></li>
+<li><a class="reference internal" href="#main.cancel_conversion"><code class="docutils literal notranslate"><span class="pre">cancel_conversion()</span></code></a></li>
 <li><a class="reference internal" href="#main.cancel_processing"><code class="docutils literal notranslate"><span class="pre">cancel_processing()</span></code></a></li>
 <li><a class="reference internal" href="#main.delete_csv"><code class="docutils literal notranslate"><span class="pre">delete_csv()</span></code></a></li>
 <li><a class="reference internal" href="#main.delete_json"><code class="docutils literal notranslate"><span class="pre">delete_json()</span></code></a></li>
@@ -617,6 +710,7 @@ Recordings are always saved with logical naming:</p>
 <li><a class="reference internal" href="#main.gen_frames"><code class="docutils literal notranslate"><span class="pre">gen_frames()</span></code></a></li>
 <li><a class="reference internal" href="#main.get_cameras_info"><code class="docutils literal notranslate"><span class="pre">get_cameras_info()</span></code></a></li>
 <li><a class="reference internal" href="#main.get_cameras_swap_state"><code class="docutils literal notranslate"><span class="pre">get_cameras_swap_state()</span></code></a></li>
+<li><a class="reference internal" href="#main.get_conversion_status"><code class="docutils literal notranslate"><span class="pre">get_conversion_status()</span></code></a></li>
 <li><a class="reference internal" href="#main.get_frame_comparison"><code class="docutils literal notranslate"><span class="pre">get_frame_comparison()</span></code></a></li>
 <li><a class="reference internal" href="#main.get_physical_camera_id"><code class="docutils literal notranslate"><span class="pre">get_physical_camera_id()</span></code></a></li>
 <li><a class="reference internal" href="#main.get_processing_status"><code class="docutils literal notranslate"><span class="pre">get_processing_status()</span></code></a></li>
@@ -627,6 +721,7 @@ Recordings are always saved with logical naming:</p>
 <li><a class="reference internal" href="#main.health"><code class="docutils literal notranslate"><span class="pre">health()</span></code></a></li>
 <li><a class="reference internal" href="#main.list_all_files"><code class="docutils literal notranslate"><span class="pre">list_all_files()</span></code></a></li>
 <li><a class="reference internal" href="#main.list_batches"><code class="docutils literal notranslate"><span class="pre">list_batches()</span></code></a></li>
+<li><a class="reference internal" href="#main.list_conversion_jobs"><code class="docutils literal notranslate"><span class="pre">list_conversion_jobs()</span></code></a></li>
 <li><a class="reference internal" href="#main.list_processing_jobs"><code class="docutils literal notranslate"><span class="pre">list_processing_jobs()</span></code></a></li>
 <li><a class="reference internal" href="#main.list_recordings"><code class="docutils literal notranslate"><span class="pre">list_recordings()</span></code></a></li>
 <li><a class="reference internal" href="#main.pause_recording"><code class="docutils literal notranslate"><span class="pre">pause_recording()</span></code></a></li>
@@ -634,12 +729,15 @@ Recordings are always saved with logical naming:</p>
 <li><a class="reference internal" href="#main.resume_recording"><code class="docutils literal notranslate"><span class="pre">resume_recording()</span></code></a></li>
 <li><a class="reference internal" href="#main.save_tagging"><code class="docutils literal notranslate"><span class="pre">save_tagging()</span></code></a></li>
 <li><a class="reference internal" href="#main.shutdown"><code class="docutils literal notranslate"><span class="pre">shutdown()</span></code></a></li>
+<li><a class="reference internal" href="#main.start_conversion"><code class="docutils literal notranslate"><span class="pre">start_conversion()</span></code></a></li>
 <li><a class="reference internal" href="#main.start_processing"><code class="docutils literal notranslate"><span class="pre">start_processing()</span></code></a></li>
 <li><a class="reference internal" href="#main.start_recording"><code class="docutils literal notranslate"><span class="pre">start_recording()</span></code></a></li>
 <li><a class="reference internal" href="#main.stop_recording"><code class="docutils literal notranslate"><span class="pre">stop_recording()</span></code></a></li>
 <li><a class="reference internal" href="#main.swap_cameras"><code class="docutils literal notranslate"><span class="pre">swap_cameras()</span></code></a></li>
 <li><a class="reference internal" href="#main.video_feed"><code class="docutils literal notranslate"><span class="pre">video_feed()</span></code></a></li>
 <li><a class="reference internal" href="#main.view_json"><code class="docutils literal notranslate"><span class="pre">view_json()</span></code></a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

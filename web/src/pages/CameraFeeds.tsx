@@ -27,6 +27,7 @@ export default function CameraFeeds() {
   const [isSwapped, setIsSwapped] = useState(false);
   const [isSwapping, setIsSwapping] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [detectedCount, setDetectedCount] = useState<number | null>(null);
 
   // Camera connection status: 'connecting' | 'connected' | 'reconnecting' | 'disconnected'
   const [camStatus, setCamStatus] = useState<Record<string, string>>({
@@ -91,6 +92,7 @@ export default function CameraFeeds() {
         const data = await res.json();
         if (mountedRef.current && data.cameras) {
           setCamerasInfo(data.cameras);
+          setDetectedCount(Object.keys(data.detected_devices || {}).length);
         }
       } catch (error: any) {
         if (error.name !== 'AbortError') console.error('Failed to fetch camera info:', error);
@@ -209,17 +211,22 @@ export default function CameraFeeds() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [recordingState]);
 
-  const currentDate = new Date().toLocaleDateString('en-US', {
+  const [clock, setClock] = useState(new Date());
+  useEffect(() => {
+    const id = setInterval(() => setClock(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const currentDate = clock.toLocaleDateString('en-US', {
     weekday: 'long',
     year: 'numeric',
     month: 'long',
     day: 'numeric',
   });
 
-  const currentTime = new Date().toLocaleTimeString('en-US', {
+  const currentTime = clock.toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
-    second: '2-digit',
   });
 
   // api call handlers - track in-flight to prevent double-clicks
@@ -230,6 +237,10 @@ export default function CameraFeeds() {
   const handleRecord = async () => {
     if (!patientName.trim() || !patientId.trim()) {
       showToast('Please enter patient name and ID before recording', 'error');
+      return;
+    }
+    if (detectedCount === 0) {
+      showToast('No cameras connected. Plug in a camera and hit Refresh.', 'error');
       return;
     }
     if (actionInFlight.current) return;
@@ -367,7 +378,8 @@ export default function CameraFeeds() {
 
       if (mountedRef.current) {
         setCamerasInfo(infoData.cameras || []);
-        const found = (infoData.cameras || []).length;
+        const found = Object.keys(infoData.detected_devices || {}).length;
+        setDetectedCount(found);
         showToast(`Found ${found} camera${found !== 1 ? 's' : ''}`, found > 0 ? 'success' : 'info');
 
         // Reset retry counters so the feeds reconnect from scratch instead of
@@ -415,9 +427,9 @@ export default function CameraFeeds() {
           <div className="h-6 w-px bg-clinical-border dark:bg-clinical-dark-border" />
           
           {/* Date/Time */}
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-clinical-text-secondary dark:text-clinical-text-dark-secondary">{currentDate}</span>
-            <span className="text-lg font-mono font-semibold text-clinical-blue">{currentTime}</span>
+          <div className="flex flex-col items-start leading-tight">
+            <span className="text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary">{currentDate}</span>
+            <span className="text-sm font-mono font-semibold text-clinical-blue">{currentTime}</span>
           </div>
           
           {/* Divider */}

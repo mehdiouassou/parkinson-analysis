@@ -3,10 +3,10 @@
   <head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="API: Camera Interface (RealSense/Bag)" href="camera.html"><link rel="prev" title="API: Main Application (FastAPI)" href="main.html">
+<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="Data Models (Pydantic)" href="models.html"><link rel="prev" title="Conversion Pipeline" href="conversion.html">
 
     <!-- Generated with Sphinx 8.1.3 and Furo 2025.12.19 -->
-        <title>API: Processing (YOLOv8 &amp; Motion) - Parkinson Analysis 1.0.0 documentation</title>
+        <title>Processing Pipeline (YOLOv8) - Parkinson Analysis 1.0.0 documentation</title>
       <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
@@ -192,12 +192,13 @@
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
   <p class="caption" role="heading"><span class="caption-text">Backend</span></p>
 <ul class="current">
-<li class="toctree-l1"><a class="reference internal" href="main.html">API: Main Application (FastAPI)</a></li>
-<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">API: Processing (YOLOv8 &amp; Motion)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="camera.html">API: Camera Interface (RealSense/Bag)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="config.html">API: Configuration</a></li>
-<li class="toctree-l1"><a class="reference internal" href="models.html">API: Data Models (Pydantic)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="writers.html">API: Writers (Video &amp; Data)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="main.html">Main Application (FastAPI)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="camera.html">Camera Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="config.html">Configuration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="conversion.html">Conversion Pipeline</a></li>
+<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">Processing Pipeline (YOLOv8)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="models.html">Data Models (Pydantic)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="writers.html">Writers</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">Frontend</span></p>
 <ul>
@@ -243,10 +244,28 @@
           </label>
         </div>
         <article role="main" id="furo-main-content">
-          <section id="api-processing-yolov8-motion">
-<h1>API: Processing (YOLOv8 &amp; Motion)<a class="headerlink" href="#api-processing-yolov8-motion" title="Link to this heading">¶</a></h1>
-<p>The processing pipeline that extracts keypoints and calculates metrics from video frames.</p>
-<p id="module-processing">Video Processing Pipeline</p>
+          <section id="processing-pipeline-yolov8">
+<h1>Processing Pipeline (YOLOv8)<a class="headerlink" href="#processing-pipeline-yolov8" title="Link to this heading">¶</a></h1>
+<p>Runs YOLOv8-Pose inference on recorded video to extract skeletal keypoints and calculate
+motion metrics. Results are saved as JSON reports in <code class="docutils literal notranslate"><span class="pre">api/processed/</span></code>.</p>
+<section id="what-it-does">
+<h2>What it does<a class="headerlink" href="#what-it-does" title="Link to this heading">¶</a></h2>
+<ol class="arabic simple">
+<li><p>Loads BAG or MP4 file (prefers BAG for depth data access)</p></li>
+<li><p>Runs YOLOv8-Pose frame by frame, extracting 17 COCO keypoints</p></li>
+<li><p>Calculates inter frame motion vectors (how much each keypoint moved)</p></li>
+<li><p>Detects tremor via nose jitter variance analysis</p></li>
+<li><p>Saves per session JSON report with all metrics</p></li>
+</ol>
+<p>Both cameras of a batch are processed in parallel threads. Progress is tracked per camera
+and exposed via the <code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/processing/status/{job_id}</span></code> endpoint.</p>
+<p>The pipeline prefers a TensorRT <code class="docutils literal notranslate"><span class="pre">.engine</span></code> file for inference and falls back to the
+PyTorch <code class="docutils literal notranslate"><span class="pre">.pt</span></code> model if no engine is available. On Jetson the engine gives much better
+throughput.</p>
+</section>
+<section id="module-processing">
+<span id="api-reference"></span><h2>API reference<a class="headerlink" href="#module-processing" title="Link to this heading">¶</a></h2>
+<p>Video Processing Pipeline</p>
 <dl class="simple">
 <dt>Real frame-by-frame processing for Parkinson’s motion analysis:</dt><dd><ul class="simple">
 <li><p>Pose keypoint detection (17 points via YOLOv8-Pose / TensorRT)</p></li>
@@ -462,29 +481,30 @@ Indices: 0:Nose, 1:L-Eye, 2:R-Eye, 3:L-Ear, 4:R-Ear</p>
 </dd></dl>
 
 </section>
+</section>
 
         </article>
       </div>
       <footer>
         
         <div class="related-pages">
-          <a class="next-page" href="camera.html">
+          <a class="next-page" href="models.html">
               <div class="page-info">
                 <div class="context">
                   <span>Next</span>
                 </div>
-                <div class="title">API: Camera Interface (RealSense/Bag)</div>
+                <div class="title">Data Models (Pydantic)</div>
               </div>
               <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
             </a>
-          <a class="prev-page" href="main.html">
+          <a class="prev-page" href="conversion.html">
               <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
               <div class="page-info">
                 <div class="context">
                   <span>Previous</span>
                 </div>
                 
-                <div class="title">API: Main Application (FastAPI)</div>
+                <div class="title">Conversion Pipeline</div>
                 
               </div>
             </a>
@@ -518,7 +538,9 @@ Indices: 0:Nose, 1:L-Eye, 2:R-Eye, 3:L-Ear, 4:R-Ear</p>
         <div class="toc-tree-container">
           <div class="toc-tree">
             <ul>
-<li><a class="reference internal" href="#">API: Processing (YOLOv8 &amp; Motion)</a><ul>
+<li><a class="reference internal" href="#">Processing Pipeline (YOLOv8)</a><ul>
+<li><a class="reference internal" href="#what-it-does">What it does</a></li>
+<li><a class="reference internal" href="#module-processing">API reference</a><ul>
 <li><a class="reference internal" href="#processing.ANALYSIS_CONFIG"><code class="docutils literal notranslate"><span class="pre">ANALYSIS_CONFIG</span></code></a></li>
 <li><a class="reference internal" href="#processing.BagFileReader"><code class="docutils literal notranslate"><span class="pre">BagFileReader</span></code></a><ul>
 <li><a class="reference internal" href="#processing.BagFileReader.get"><code class="docutils literal notranslate"><span class="pre">BagFileReader.get()</span></code></a></li>
@@ -538,6 +560,8 @@ Indices: 0:Nose, 1:L-Eye, 2:R-Eye, 3:L-Ear, 4:R-Ear</p>
 <li><a class="reference internal" href="#processing.is_batch_processing"><code class="docutils literal notranslate"><span class="pre">is_batch_processing()</span></code></a></li>
 <li><a class="reference internal" href="#processing.process_video"><code class="docutils literal notranslate"><span class="pre">process_video()</span></code></a></li>
 <li><a class="reference internal" href="#processing.update_job_progress"><code class="docutils literal notranslate"><span class="pre">update_job_progress()</span></code></a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

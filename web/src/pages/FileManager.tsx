@@ -52,6 +52,10 @@ interface CameraQuality {
   fps: number;
   bag_size_mb?: number;
   mp4_size_mb?: number;
+  recording_started_at?: string | null;
+  recording_stopped_at?: string | null;
+  inter_camera_offset_ms?: number;
+  pipeline_restart_ms?: number;
 }
 
 interface QualitySync {
@@ -60,6 +64,17 @@ interface QualitySync {
   frame_count_difference: number;
   time_offset_seconds: number;
   in_sync: boolean;
+  // BAG-level sync (pre-conversion)
+  cam1_bag_frames?: number;
+  cam2_bag_frames?: number;
+  bag_frame_count_difference?: number;
+  bag_time_offset_seconds?: number;
+  // Recording start offset (ground truth from pipeline timestamps)
+  recording_start_offset_ms?: number;
+  cam1_pipeline_restart_ms?: number;
+  cam2_pipeline_restart_ms?: number;
+  sync_quality?: 'excellent' | 'good' | 'fair' | 'poor';
+  warning?: string;
 }
 
 interface QualityData {
@@ -1096,31 +1111,31 @@ export default function FileManager() {
       {/* Quality Analysis Modal */}
       {qualityBatchId && (
         <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
           onClick={closeQualityModal}
         >
           <div
-            className="bg-clinical-card dark:bg-clinical-dark-card rounded-lg shadow-2xl w-full max-w-2xl flex flex-col"
+            className="bg-clinical-card dark:bg-clinical-dark-card rounded-xl shadow-2xl w-full max-w-xl flex flex-col overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-clinical-border dark:border-clinical-dark-border flex-shrink-0">
-              <div className="flex items-center gap-3">
-                <span className="px-2 py-1 text-xs font-semibold rounded bg-clinical-blue/10 text-clinical-blue">QUALITY</span>
-                <h2 className="text-lg font-semibold text-clinical-text-primary dark:text-clinical-text-dark truncate">{qualityBatchId}</h2>
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-clinical-border dark:border-clinical-dark-border">
+              <div className="flex items-center gap-2.5">
+                <span className="px-2 py-0.5 text-xs font-bold tracking-wider rounded bg-clinical-blue/10 text-clinical-blue">QUALITY</span>
+                <h2 className="text-sm font-semibold font-mono text-clinical-text-primary dark:text-clinical-text-dark truncate">{qualityBatchId}</h2>
               </div>
               <button
                 onClick={closeQualityModal}
-                className="p-2 text-clinical-text-secondary hover:text-clinical-text-primary dark:text-clinical-text-dark-secondary dark:hover:text-clinical-text-dark hover:bg-clinical-bg dark:hover:bg-clinical-dark-bg rounded transition-colors"
+                className="p-1.5 rounded text-clinical-text-secondary hover:bg-clinical-bg dark:hover:bg-clinical-dark-bg transition-colors"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
 
-            {/* Modal Content */}
-            <div className="p-6 space-y-5">
+            {/* Content */}
+            <div className="p-5">
               {qualityLoading ? (() => {
                 const batch = files.videos.find(b => b.batch_id === qualityBatchId);
                 const fmtSize = (bytes: number) =>
@@ -1131,8 +1146,7 @@ export default function FileManager() {
                 const bag2 = batch?.camera2_hq_size ? fmtSize(batch.camera2_hq_size) : null;
                 const sizeHint = bag1 && bag2 ? `${bag1} + ${bag2}` : bag1 ?? bag2 ?? null;
                 return (
-                  <div className="py-4 space-y-5">
-                    {/* Status text */}
+                  <div className="py-6 space-y-4">
                     <div className="text-center space-y-1">
                       <p className="text-sm font-medium text-clinical-text-primary dark:text-clinical-text-dark">
                         Replaying BAG files — counting exact frames
@@ -1141,22 +1155,15 @@ export default function FileManager() {
                         {sizeHint ? `Analysing ${sizeHint} of depth data` : 'Reading depth recordings'}{'. Large files can take up to 90 s.'}
                       </p>
                     </div>
-
-                    {/* Indeterminate progress bar */}
-                    <div className="relative h-2 bg-clinical-border dark:bg-clinical-dark-border rounded-full overflow-hidden">
+                    <div className="relative h-1.5 bg-clinical-border dark:bg-clinical-dark-border rounded-full overflow-hidden">
                       <div className="absolute inset-y-0 w-1/3 bg-clinical-blue rounded-full animate-shimmer" />
                     </div>
-
-                    {/* Elapsed time + phase hint */}
                     <div className="flex items-center justify-between text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary">
                       <span className="font-mono tabular-nums">{qualityElapsed}s elapsed</span>
                       <span>
-                        {qualityElapsed < 10
-                          ? 'Opening pipeline…'
-                          : qualityElapsed < 40
-                          ? 'Counting frames…'
-                          : qualityElapsed < 70
-                          ? 'Almost there…'
+                        {qualityElapsed < 10 ? 'Opening pipeline…'
+                          : qualityElapsed < 40 ? 'Counting frames…'
+                          : qualityElapsed < 70 ? 'Almost there…'
                           : 'Finalising…'}
                       </span>
                     </div>
@@ -1165,134 +1172,203 @@ export default function FileManager() {
               })() : qualityData ? (() => {
                 const { cameras, sync } = qualityData;
 
-                // Sync score helpers
-                const fps = cameras.camera1?.fps || cameras.camera2?.fps || 30;
-                const frameDiff = sync?.frame_count_difference ?? null;
-                const syncScore = (() => {
-                  if (frameDiff === null || !sync) return null;
-                  if (frameDiff === 0) return { label: 'Perfect', color: 'text-clinical-ready', bg: 'bg-clinical-ready/10 border-clinical-ready/30' };
-                  if (frameDiff <= fps * 0.5) return { label: 'Good', color: 'text-clinical-ready', bg: 'bg-clinical-ready/10 border-clinical-ready/30' };
-                  if (frameDiff <= fps * 2) return { label: 'Fair', color: 'text-clinical-warning', bg: 'bg-clinical-warning/10 border-clinical-warning/30' };
-                  return { label: 'Poor', color: 'text-clinical-record', bg: 'bg-clinical-record/10 border-clinical-record/30' };
-                })();
+                // 0-100 score: 30pts recording start sync + 20pts frame count sync + 25pts per camera drop rate
+                const startOffMs = sync?.recording_start_offset_ms ?? 0;
+                const startSyncPts = sync ? Math.max(0, 30 - Math.round(startOffMs / 500 * 30)) : 30;
+                const timeOff = sync?.time_offset_seconds ?? 0;
+                const frameSyncPts = sync ? Math.max(0, 20 - Math.round(timeOff * 20)) : 20;
+                const drop1 = cameras.camera1?.drop_rate_percent ?? 0;
+                const drop2 = cameras.camera2?.drop_rate_percent ?? 0;
+                const cam1Pts = Math.max(0, 25 - Math.round(drop1 * 5));
+                const cam2Pts = Math.max(0, 25 - Math.round(drop2 * 5));
+                const score = Math.min(100, startSyncPts + frameSyncPts + cam1Pts + cam2Pts);
+
+                const scoreLabel = score >= 90 ? 'Excellent' : score >= 75 ? 'Good' : score >= 50 ? 'Fair' : score >= 25 ? 'Poor' : 'Critical';
+                const scoreHex = score >= 75 ? '#22c55e' : score >= 50 ? '#f59e0b' : '#ef4444';
+                const scoreText = score >= 75 ? 'text-green-500' : score >= 50 ? 'text-amber-500' : 'text-red-500';
+                const scoreBg = score >= 75 ? 'bg-green-500/10' : score >= 50 ? 'bg-amber-500/10' : 'bg-red-500/10';
+                const syncQuality = sync?.sync_quality;
+
+                const r = 54;
+                const circ = 2 * Math.PI * r;
+                const dashOffset = circ - (score / 100) * circ;
 
                 return (
-                  <>
-                    {/* Sync Score Banner */}
-                    {sync && syncScore && (
-                      <div className={`rounded-lg border p-4 ${syncScore.bg}`}>
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-sm font-medium text-clinical-text-secondary dark:text-clinical-text-dark-secondary">Synchronisation Score</p>
-                            <p className={`text-2xl font-bold mt-0.5 ${syncScore.color}`}>{syncScore.label}</p>
+                  <div className="space-y-4">
+                    {/* Gauge + metrics row */}
+                    <div className="flex items-center gap-5">
+                      {/* Radial gauge */}
+                      <div className="flex-shrink-0">
+                        <svg width="140" height="140" viewBox="0 0 140 140">
+                          {/* Track */}
+                          <circle
+                            cx="70" cy="70" r={r}
+                            fill="none" stroke="currentColor" strokeWidth="10"
+                            className="text-clinical-border dark:text-clinical-dark-border"
+                          />
+                          {/* Progress arc */}
+                          <circle
+                            cx="70" cy="70" r={r}
+                            fill="none"
+                            stroke={scoreHex}
+                            strokeWidth="10"
+                            strokeLinecap="round"
+                            strokeDasharray={`${circ} ${circ}`}
+                            strokeDashoffset={dashOffset}
+                            transform="rotate(-90 70 70)"
+                          />
+                          {/* Score number */}
+                          <text
+                            x="70" y="68"
+                            textAnchor="middle" dominantBaseline="middle"
+                            fontSize="32" fontWeight="700"
+                            fill={scoreHex}
+                          >{score}</text>
+                          {/* Label */}
+                          <text
+                            x="70" y="92"
+                            textAnchor="middle" dominantBaseline="middle"
+                            fontSize="12" fontWeight="500"
+                            fill="#9ca3af"
+                          >{scoreLabel}</text>
+                        </svg>
+                      </div>
+
+                      {/* Metrics */}
+                      <div className="flex-1 space-y-2">
+                        {sync && (
+                          <>
+                            {/* Recording start offset — ground truth from pipeline timestamps */}
+                            <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-clinical-bg dark:bg-clinical-dark-bg">
+                              <span className="text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary">Start offset</span>
+                              <span className={`font-mono font-semibold text-sm ${
+                                startOffMs <= 100 ? 'text-green-500' : startOffMs <= 500 ? 'text-amber-500' : 'text-red-500'
+                              }`}>{startOffMs.toFixed(0)}ms</span>
+                            </div>
+                            <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-clinical-bg dark:bg-clinical-dark-bg">
+                              <span className="text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary">MP4 Frame Δ</span>
+                              <span className={`font-mono font-semibold text-sm ${scoreText}`}>{sync.frame_count_difference}</span>
+                            </div>
+                            {sync.bag_frame_count_difference != null && (
+                              <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-clinical-bg dark:bg-clinical-dark-bg">
+                                <span className="text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary">BAG Frame Δ</span>
+                                <span className={`font-mono font-semibold text-sm ${scoreText}`}>{sync.bag_frame_count_difference}</span>
+                              </div>
+                            )}
+                            <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-clinical-bg dark:bg-clinical-dark-bg">
+                              <span className="text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary">Cam 1 / Cam 2</span>
+                              <span className="font-mono text-xs text-clinical-text-primary dark:text-clinical-text-dark">{sync.cam1_mp4_frames} / {sync.cam2_mp4_frames}</span>
+                            </div>
+                          </>
+                        )}
+                        {/* Sync quality badge */}
+                        {syncQuality && (
+                          <div className={`px-3 py-1.5 rounded-lg text-xs font-bold text-center uppercase tracking-wider ${
+                            syncQuality === 'excellent' ? 'bg-green-500/10 text-green-500'
+                              : syncQuality === 'good' ? 'bg-green-500/10 text-green-400'
+                              : syncQuality === 'fair' ? 'bg-amber-500/10 text-amber-500'
+                              : 'bg-red-500/10 text-red-500'
+                          }`}>
+                            {syncQuality} sync
                           </div>
-                          <div className="text-right text-sm">
-                            <p className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">Frame Δ</p>
-                            <p className={`text-xl font-mono font-semibold ${syncScore.color}`}>{frameDiff}</p>
-                          </div>
-                          <div className="text-right text-sm">
-                            <p className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">Time offset</p>
-                            <p className={`text-xl font-mono font-semibold ${syncScore.color}`}>{sync.time_offset_seconds.toFixed(3)}s</p>
-                          </div>
-                        </div>
-                        <div className="mt-3 grid grid-cols-2 gap-4 pt-3 border-t border-current/20">
-                          <div>
-                            <p className="text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary">CAM 1 MP4 frames</p>
-                            <p className="font-mono font-semibold text-clinical-text-primary dark:text-clinical-text-dark">{sync.cam1_mp4_frames.toLocaleString()}</p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary">CAM 2 MP4 frames</p>
-                            <p className="font-mono font-semibold text-clinical-text-primary dark:text-clinical-text-dark">{sync.cam2_mp4_frames.toLocaleString()}</p>
-                          </div>
+                        )}
+                        {/* Score breakdown */}
+                        <div className={`px-3 py-1.5 rounded-lg text-xs font-medium text-center ${scoreBg} ${scoreText}`}>
+                          {sync ? `Start ${startSyncPts}/30 · Frames ${frameSyncPts}/20` : 'No sync data'} · Cam1 {cam1Pts}/25 · Cam2 {cam2Pts}/25
                         </div>
                       </div>
-                    )}
+                    </div>
 
-                    {/* Per-Camera Stats */}
-                    <div className="grid grid-cols-2 gap-4">
+                    {/* Per-camera cards */}
+                    <div className="grid grid-cols-2 gap-3">
                       {(['camera1', 'camera2'] as const).map((camKey, i) => {
                         const cam = cameras[camKey] as CameraQuality | undefined;
                         if (!cam) return (
-                          <div key={camKey} className="bg-clinical-bg dark:bg-clinical-dark-bg rounded-lg p-4 border border-clinical-border dark:border-clinical-dark-border">
-                            <p className="text-sm font-semibold text-clinical-text-secondary dark:text-clinical-text-dark-secondary mb-2">Camera {i + 1}</p>
-                            <p className="text-sm text-clinical-record">No data</p>
+                          <div key={camKey} className="rounded-lg p-3 border border-clinical-border dark:border-clinical-dark-border">
+                            <p className="text-xs font-bold text-clinical-text-secondary dark:text-clinical-text-dark-secondary mb-1">Camera {i + 1}</p>
+                            <p className="text-xs text-red-500">No data</p>
                           </div>
                         );
                         const dropOk = (cam.drop_rate_percent ?? 0) <= 1;
                         const dropFair = (cam.drop_rate_percent ?? 0) <= 5;
-                        const dropColor = dropOk ? 'text-clinical-ready' : dropFair ? 'text-clinical-warning' : 'text-clinical-record';
+                        const dropColor = dropOk ? 'text-green-500' : dropFair ? 'text-amber-500' : 'text-red-500';
                         return (
-                          <div key={camKey} className="bg-clinical-bg dark:bg-clinical-dark-bg rounded-lg p-4 border border-clinical-border dark:border-clinical-dark-border space-y-2">
-                            <p className="text-sm font-semibold text-clinical-text-primary dark:text-clinical-text-dark">Camera {i + 1}</p>
-                            <div className="space-y-1.5 text-sm">
-                              <div className="flex justify-between">
-                                <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">MP4 frames</span>
-                                <span className="font-mono font-semibold text-clinical-text-primary dark:text-clinical-text-dark">{cam.mp4_frames?.toLocaleString() ?? '—'}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary" title="Exact frame count replayed from the BAG file">BAG frames</span>
-                                <span className="font-mono font-semibold text-clinical-text-primary dark:text-clinical-text-dark">
-                                  {cam.bag_frames != null
-                                    ? <>
-                                        {cam.bag_frames.toLocaleString()}
-                                        {cam.mp4_frames != null && cam.bag_frames !== cam.mp4_frames && (
-                                          <span className="text-xs ml-1 text-clinical-text-secondary dark:text-clinical-text-dark-secondary opacity-70">
-                                            (Δ{Math.abs(cam.bag_frames - cam.mp4_frames)})
-                                          </span>
-                                        )}
-                                      </>
-                                    : <span className="opacity-50">{cam.bag_frames_source === 'realsense_unavailable' ? 'no RS' : '—'}</span>
-                                  }
+                          <div key={camKey} className="rounded-lg p-3 border border-clinical-border dark:border-clinical-dark-border space-y-1.5">
+                            <p className="text-xs font-bold text-clinical-text-primary dark:text-clinical-text-dark mb-2">Camera {i + 1}</p>
+                            <div className="flex justify-between text-xs">
+                              <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">MP4 frames</span>
+                              <span className="font-mono font-semibold text-clinical-text-primary dark:text-clinical-text-dark">{cam.mp4_frames?.toLocaleString() ?? '—'}</span>
+                            </div>
+                            <div className="flex justify-between text-xs">
+                              <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">BAG frames</span>
+                              <span className="font-mono text-clinical-text-primary dark:text-clinical-text-dark">
+                                {cam.bag_frames != null
+                                  ? cam.bag_frames.toLocaleString()
+                                  : <span className="opacity-40">—</span>
+                                }
+                              </span>
+                            </div>
+                            {cam.mp4_frames_from_sidecar != null && (
+                              <div className="flex justify-between text-xs">
+                                <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">Frames at stop</span>
+                                <span className={`font-mono ${cam.mp4_frames_from_sidecar === cam.mp4_frames ? 'text-green-500' : 'text-amber-500'}`}>
+                                  {cam.mp4_frames_from_sidecar.toLocaleString()}
                                 </span>
                               </div>
-                              {cam.mp4_frames_from_sidecar != null && (
-                                <div className="flex justify-between">
-                                  <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary" title="Frames counter saved by the backend at recording stop — cross-check against the MP4 container">Frames at stop</span>
-                                  <span className={`font-mono text-sm ${cam.mp4_frames_from_sidecar === cam.mp4_frames ? 'text-clinical-ready' : 'text-clinical-warning'}`}>
-                                    {cam.mp4_frames_from_sidecar.toLocaleString()}
-                                    {cam.mp4_frames != null && cam.mp4_frames_from_sidecar !== cam.mp4_frames && (
-                                      <span className="text-xs ml-1 opacity-70">(Δ{Math.abs(cam.mp4_frames_from_sidecar - cam.mp4_frames)})</span>
-                                    )}
-                                  </span>
-                                </div>
-                              )}
-                              <div className="flex justify-between">
-                                <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">Frame drops</span>
-                                <span className={`font-mono font-semibold ${dropColor}`}>{cam.frame_difference ?? '—'}</span>
+                            )}
+                            <div className="flex justify-between text-xs">
+                              <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">Frame drops</span>
+                              <span className={`font-mono font-semibold ${dropColor}`}>{cam.frame_difference ?? '—'}</span>
+                            </div>
+                            <div className="flex justify-between text-xs">
+                              <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">Drop rate</span>
+                              <span className={`font-mono font-semibold ${dropColor}`}>{cam.drop_rate_percent != null ? `${cam.drop_rate_percent}%` : '—'}</span>
+                            </div>
+                            <div className="flex justify-between text-xs">
+                              <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">FPS</span>
+                              <span className="font-mono text-clinical-text-secondary dark:text-clinical-text-dark-secondary">{cam.fps}</span>
+                            </div>
+                            {cam.bag_size_mb != null && (
+                              <div className="flex justify-between text-xs">
+                                <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">BAG / MP4</span>
+                                <span className="font-mono text-clinical-text-secondary dark:text-clinical-text-dark-secondary">{cam.bag_size_mb} MB / {cam.mp4_size_mb} MB</span>
                               </div>
-                              <div className="flex justify-between">
-                                <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">Drop rate</span>
-                                <span className={`font-mono font-semibold ${dropColor}`}>{cam.drop_rate_percent != null ? `${cam.drop_rate_percent}%` : '—'}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">FPS</span>
-                                <span className="font-mono text-clinical-text-secondary dark:text-clinical-text-dark-secondary">{cam.fps}</span>
-                              </div>
-                              {cam.bag_size_mb != null && (
-                                <div className="flex justify-between">
-                                  <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">BAG / MP4</span>
-                                  <span className="font-mono text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary">{cam.bag_size_mb} MB / {cam.mp4_size_mb} MB</span>
-                                </div>
-                              )}
-                              <div className="flex gap-2 pt-1">
-                                <span className={`text-xs px-1.5 py-0.5 rounded ${cam.bag_exists ? 'bg-clinical-ready/10 text-clinical-ready' : 'bg-clinical-record/10 text-clinical-record'}`}>BAG {cam.bag_exists ? '✓' : '✗'}</span>
-                                <span className={`text-xs px-1.5 py-0.5 rounded ${cam.mp4_exists ? 'bg-clinical-ready/10 text-clinical-ready' : 'bg-clinical-record/10 text-clinical-record'}`}>MP4 {cam.mp4_exists ? '✓' : '✗'}</span>
-                              </div>
+                            )}
+                            <div className="flex gap-1.5 pt-0.5">
+                              <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${cam.bag_exists ? 'bg-green-500/10 text-green-600 dark:text-green-400' : 'bg-red-500/10 text-red-500'}`}>BAG {cam.bag_exists ? '✓' : '✗'}</span>
+                              <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${cam.mp4_exists ? 'bg-green-500/10 text-green-600 dark:text-green-400' : 'bg-red-500/10 text-red-500'}`}>MP4 {cam.mp4_exists ? '✓' : '✗'}</span>
                             </div>
                           </div>
                         );
                       })}
                     </div>
 
+                    {/* Sync warning banner */}
+                    {sync?.warning && (
+                      <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                        <svg className="w-4 h-4 mt-0.5 flex-shrink-0 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        <p className="text-xs text-amber-600 dark:text-amber-400 leading-relaxed">{sync.warning}</p>
+                      </div>
+                    )}
+
+                    {/* Pipeline restart times */}
+                    {sync && (sync.cam1_pipeline_restart_ms || sync.cam2_pipeline_restart_ms) ? (
+                      <div className="flex items-center justify-center gap-4 text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary">
+                        <span>Pipeline restart: Cam1 {sync.cam1_pipeline_restart_ms?.toFixed(0) ?? '?'}ms · Cam2 {sync.cam2_pipeline_restart_ms?.toFixed(0) ?? '?'}ms</span>
+                      </div>
+                    ) : null}
+
                     {!sync && (
-                      <p className="text-sm text-clinical-text-secondary dark:text-clinical-text-dark-secondary text-center py-2">
-                        Sync data unavailable (need both cameras to compare).
+                      <p className="text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary text-center py-1">
+                        Sync data unavailable — need both cameras to compare.
                       </p>
                     )}
-                  </>
+                  </div>
                 );
               })() : (
-                <p className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary text-center py-8">No quality data available</p>
+                <p className="text-sm text-clinical-text-secondary dark:text-clinical-text-dark-secondary text-center py-8">No quality data available</p>
               )}
             </div>
           </div>

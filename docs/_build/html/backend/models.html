@@ -3,10 +3,10 @@
   <head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="API: Writers (Video &amp; Data)" href="writers.html"><link rel="prev" title="API: Configuration" href="config.html">
+<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="Writers" href="writers.html"><link rel="prev" title="Processing Pipeline (YOLOv8)" href="processing.html">
 
     <!-- Generated with Sphinx 8.1.3 and Furo 2025.12.19 -->
-        <title>API: Data Models (Pydantic) - Parkinson Analysis 1.0.0 documentation</title>
+        <title>Data Models (Pydantic) - Parkinson Analysis 1.0.0 documentation</title>
       <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
@@ -192,12 +192,13 @@
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
   <p class="caption" role="heading"><span class="caption-text">Backend</span></p>
 <ul class="current">
-<li class="toctree-l1"><a class="reference internal" href="main.html">API: Main Application (FastAPI)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="processing.html">API: Processing (YOLOv8 &amp; Motion)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="camera.html">API: Camera Interface (RealSense/Bag)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="config.html">API: Configuration</a></li>
-<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">API: Data Models (Pydantic)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="writers.html">API: Writers (Video &amp; Data)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="main.html">Main Application (FastAPI)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="camera.html">Camera Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="config.html">Configuration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="conversion.html">Conversion Pipeline</a></li>
+<li class="toctree-l1"><a class="reference internal" href="processing.html">Processing Pipeline (YOLOv8)</a></li>
+<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">Data Models (Pydantic)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="writers.html">Writers</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">Frontend</span></p>
 <ul>
@@ -243,10 +244,13 @@
           </label>
         </div>
         <article role="main" id="furo-main-content">
-          <section id="api-data-models-pydantic">
-<h1>API: Data Models (Pydantic)<a class="headerlink" href="#api-data-models-pydantic" title="Link to this heading">¶</a></h1>
-<p>Pydantic schemas for API request and response validation.</p>
-<p id="module-models">Pydantic models for request/response validation.</p>
+          <section id="data-models-pydantic">
+<h1>Data Models (Pydantic)<a class="headerlink" href="#data-models-pydantic" title="Link to this heading">¶</a></h1>
+<p>Pydantic schemas for API request and response validation. Used by FastAPI for
+automatic request parsing and OpenAPI schema generation.</p>
+<section id="module-models">
+<span id="api-reference"></span><h2>API reference<a class="headerlink" href="#module-models" title="Link to this heading">¶</a></h2>
+<p>Pydantic models for request/response validation.</p>
 <dl class="py class">
 <dt class="sig sig-object py" id="models.ActionLog">
 <em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">models.</span></span><span class="sig-name descname"><span class="pre">ActionLog</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/models.html#ActionLog"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#models.ActionLog" title="Link to this definition">¶</a></dt>
@@ -270,6 +274,23 @@
 <dl class="py attribute">
 <dt class="sig sig-object py" id="models.ActionLog.id">
 <span class="sig-name descname"><span class="pre">id</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#models.ActionLog.id" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="models.ConversionStartRequest">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">models.</span></span><span class="sig-name descname"><span class="pre">ConversionStartRequest</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/models.html#ConversionStartRequest"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#models.ConversionStartRequest" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">BaseModel</span></code></p>
+<p>Request to start BAG→MP4 conversion for a batch.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="models.ConversionStartRequest.batch_id">
+<span class="sig-name descname"><span class="pre">batch_id</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#models.ConversionStartRequest.batch_id" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="models.ConversionStartRequest.force">
+<span class="sig-name descname"><span class="pre">force</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">False</span></em><a class="headerlink" href="#models.ConversionStartRequest.force" title="Link to this definition">¶</a></dt>
 <dd></dd></dl>
 
 </dd></dl>
@@ -321,6 +342,7 @@
 </dd></dl>
 
 </section>
+</section>
 
         </article>
       </div>
@@ -332,18 +354,18 @@
                 <div class="context">
                   <span>Next</span>
                 </div>
-                <div class="title">API: Writers (Video &amp; Data)</div>
+                <div class="title">Writers</div>
               </div>
               <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
             </a>
-          <a class="prev-page" href="config.html">
+          <a class="prev-page" href="processing.html">
               <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
               <div class="page-info">
                 <div class="context">
                   <span>Previous</span>
                 </div>
                 
-                <div class="title">API: Configuration</div>
+                <div class="title">Processing Pipeline (YOLOv8)</div>
                 
               </div>
             </a>
@@ -377,12 +399,18 @@
         <div class="toc-tree-container">
           <div class="toc-tree">
             <ul>
-<li><a class="reference internal" href="#">API: Data Models (Pydantic)</a><ul>
+<li><a class="reference internal" href="#">Data Models (Pydantic)</a><ul>
+<li><a class="reference internal" href="#module-models">API reference</a><ul>
 <li><a class="reference internal" href="#models.ActionLog"><code class="docutils literal notranslate"><span class="pre">ActionLog</span></code></a><ul>
 <li><a class="reference internal" href="#models.ActionLog.action"><code class="docutils literal notranslate"><span class="pre">ActionLog.action</span></code></a></li>
 <li><a class="reference internal" href="#models.ActionLog.direction"><code class="docutils literal notranslate"><span class="pre">ActionLog.direction</span></code></a></li>
 <li><a class="reference internal" href="#models.ActionLog.frame"><code class="docutils literal notranslate"><span class="pre">ActionLog.frame</span></code></a></li>
 <li><a class="reference internal" href="#models.ActionLog.id"><code class="docutils literal notranslate"><span class="pre">ActionLog.id</span></code></a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#models.ConversionStartRequest"><code class="docutils literal notranslate"><span class="pre">ConversionStartRequest</span></code></a><ul>
+<li><a class="reference internal" href="#models.ConversionStartRequest.batch_id"><code class="docutils literal notranslate"><span class="pre">ConversionStartRequest.batch_id</span></code></a></li>
+<li><a class="reference internal" href="#models.ConversionStartRequest.force"><code class="docutils literal notranslate"><span class="pre">ConversionStartRequest.force</span></code></a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#models.ProcessRequest"><code class="docutils literal notranslate"><span class="pre">ProcessRequest</span></code></a><ul>
@@ -397,6 +425,8 @@
 <li><a class="reference internal" href="#models.SaveTaggingRequest"><code class="docutils literal notranslate"><span class="pre">SaveTaggingRequest</span></code></a><ul>
 <li><a class="reference internal" href="#models.SaveTaggingRequest.logs"><code class="docutils literal notranslate"><span class="pre">SaveTaggingRequest.logs</span></code></a></li>
 <li><a class="reference internal" href="#models.SaveTaggingRequest.videoFile"><code class="docutils literal notranslate"><span class="pre">SaveTaggingRequest.videoFile</span></code></a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

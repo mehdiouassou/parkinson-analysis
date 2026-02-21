@@ -3,7 +3,7 @@
   <head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="Pages" href="pages.html"><link rel="prev" title="API: Writers (Video &amp; Data)" href="../backend/writers.html">
+<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="Pages" href="pages.html"><link rel="prev" title="Writers" href="../backend/writers.html">
 
     <!-- Generated with Sphinx 8.1.3 and Furo 2025.12.19 -->
         <title>Frontend - Parkinson Analysis 1.0.0 documentation</title>
@@ -192,12 +192,13 @@
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
   <p class="caption" role="heading"><span class="caption-text">Backend</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="../backend/main.html">API: Main Application (FastAPI)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/processing.html">API: Processing (YOLOv8 &amp; Motion)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/camera.html">API: Camera Interface (RealSense/Bag)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/config.html">API: Configuration</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/models.html">API: Data Models (Pydantic)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/writers.html">API: Writers (Video &amp; Data)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/main.html">Main Application (FastAPI)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/camera.html">Camera Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/config.html">Configuration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/conversion.html">Conversion Pipeline</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/processing.html">Processing Pipeline (YOLOv8)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/models.html">Data Models (Pydantic)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/writers.html">Writers</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">Frontend</span></p>
 <ul class="current">
@@ -245,7 +246,9 @@
         <article role="main" id="furo-main-content">
           <section id="frontend">
 <h1>Frontend<a class="headerlink" href="#frontend" title="Link to this heading">¶</a></h1>
-<p>React/TypeScript application in <code class="docutils literal notranslate"><span class="pre">web/</span></code>. Talks to the FastAPI backend over <code class="docutils literal notranslate"><span class="pre">VITE_API_URL</span></code> (default <code class="docutils literal notranslate"><span class="pre">http://localhost:8000</span></code>).</p>
+<p>React 19 + TypeScript application in <code class="docutils literal notranslate"><span class="pre">web/</span></code>. Talks to the FastAPI backend over
+<code class="docutils literal notranslate"><span class="pre">VITE_API_URL</span></code> (default <code class="docutils literal notranslate"><span class="pre">http://localhost:8000</span></code>).</p>
+<p>Built with Vite and styled with Tailwind CSS. Uses React Router 7 for page navigation.</p>
 <section id="dev-server">
 <h2>Dev server<a class="headerlink" href="#dev-server" title="Link to this heading">¶</a></h2>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">cd</span><span class="w"> </span>web
@@ -261,6 +264,16 @@ npm<span class="w"> </span>run<span class="w"> </span>build
 </pre></div>
 </div>
 <p>Output goes to <code class="docutils literal notranslate"><span class="pre">web/dist/</span></code>.</p>
+</section>
+<section id="pages-overview">
+<h2>Pages overview<a class="headerlink" href="#pages-overview" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p><strong>Camera Feeds</strong> — live MJPEG preview, recording controls, patient info, camera swap</p></li>
+<li><p><strong>Tagging</strong> — frame accurate video player for annotating movement events</p></li>
+<li><p><strong>Conversion</strong> — BAG to MP4 conversion with per camera progress bars</p></li>
+<li><p><strong>Processing</strong> — YOLOv8 pose analysis with per camera progress</p></li>
+<li><p><strong>File Manager</strong> — file browser, downloads, quality analysis modal with sync data</p></li>
+</ul>
 </section>
 </section>
 
@@ -285,7 +298,7 @@ npm<span class="w"> </span>run<span class="w"> </span>build
                   <span>Previous</span>
                 </div>
                 
-                <div class="title">API: Writers (Video &amp; Data)</div>
+                <div class="title">Writers</div>
                 
               </div>
             </a>
@@ -322,6 +335,7 @@ npm<span class="w"> </span>run<span class="w"> </span>build
 <li><a class="reference internal" href="#">Frontend</a><ul>
 <li><a class="reference internal" href="#dev-server">Dev server</a></li>
 <li><a class="reference internal" href="#production-build">Production build</a></li>
+<li><a class="reference internal" href="#pages-overview">Pages overview</a></li>
 </ul>
 </li>
 </ul>

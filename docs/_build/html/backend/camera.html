@@ -3,10 +3,10 @@
   <head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="API: Configuration" href="config.html"><link rel="prev" title="API: Processing (YOLOv8 &amp; Motion)" href="processing.html">
+<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="Configuration" href="config.html"><link rel="prev" title="Main Application (FastAPI)" href="main.html">
 
     <!-- Generated with Sphinx 8.1.3 and Furo 2025.12.19 -->
-        <title>API: Camera Interface (RealSense/Bag) - Parkinson Analysis 1.0.0 documentation</title>
+        <title>Camera Interface - Parkinson Analysis 1.0.0 documentation</title>
       <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
@@ -192,12 +192,13 @@
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
   <p class="caption" role="heading"><span class="caption-text">Backend</span></p>
 <ul class="current">
-<li class="toctree-l1"><a class="reference internal" href="main.html">API: Main Application (FastAPI)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="processing.html">API: Processing (YOLOv8 &amp; Motion)</a></li>
-<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">API: Camera Interface (RealSense/Bag)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="config.html">API: Configuration</a></li>
-<li class="toctree-l1"><a class="reference internal" href="models.html">API: Data Models (Pydantic)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="writers.html">API: Writers (Video &amp; Data)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="main.html">Main Application (FastAPI)</a></li>
+<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">Camera Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="config.html">Configuration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="conversion.html">Conversion Pipeline</a></li>
+<li class="toctree-l1"><a class="reference internal" href="processing.html">Processing Pipeline (YOLOv8)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="models.html">Data Models (Pydantic)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="writers.html">Writers</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">Frontend</span></p>
 <ul>
@@ -243,10 +244,35 @@
           </label>
         </div>
         <article role="main" id="furo-main-content">
-          <section id="api-camera-interface-realsense-bag">
-<h1>API: Camera Interface (RealSense/Bag)<a class="headerlink" href="#api-camera-interface-realsense-bag" title="Link to this heading">¶</a></h1>
-<p>Handles connections to Intel RealSense cameras and reading from <cite>.bag</cite> files.</p>
-<p id="module-camera">Camera Source Abstraction Layer</p>
+          <section id="camera-interface">
+<h1>Camera Interface<a class="headerlink" href="#camera-interface" title="Link to this heading">¶</a></h1>
+<p>The <code class="docutils literal notranslate"><span class="pre">CameraSource</span></code> class wraps the RealSense SDK and provides a unified interface for
+live camera capture and .bag file playback. Each camera gets its own background capture thread
+that continuously reads frames and stores the latest one for the MJPEG generator to pick up.</p>
+<section id="how-it-works">
+<h2>How it works<a class="headerlink" href="#how-it-works" title="Link to this heading">¶</a></h2>
+<p>On startup each camera tries to start at the configured resolution and FPS. For dual camera
+setups it tries 60fps first then falls back to 30fps if USB bandwidth is insufficient.
+Cameras are staggered by 0.5s on startup to avoid USB enumeration conflicts.</p>
+<p>The capture loop runs in a daemon thread calling <code class="docutils literal notranslate"><span class="pre">pipeline.wait_for_frames()</span></code> with a 2s
+timeout. Frames are converted to numpy arrays and stored atomically behind a lock. The MJPEG
+generator and any other consumers just read the latest frame without blocking capture.</p>
+<p>Recording uses the RealSense SDK <code class="docutils literal notranslate"><span class="pre">enable_record_to_file</span></code> which records directly to .bag
+with zero frame drops. Starting recording requires a pipeline restart (stop the streaming
+pipeline, restart with recording enabled). Same for stopping. This causes a brief interruption
+in the MJPEG stream but the frontend handles it with retry logic.</p>
+<p>Pause and resume use the SDK recorder device <code class="docutils literal notranslate"><span class="pre">pause()</span></code>/<code class="docutils literal notranslate"><span class="pre">resume()</span></code> without restarting the
+pipeline. The capture thread keeps running (so streaming doesnt break) but no frames are
+written to the BAG file.</p>
+</section>
+<section id="global-management">
+<h2>Global management<a class="headerlink" href="#global-management" title="Link to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">get_camera_source(camera_id)</span></code> lazily creates and starts cameras in background threads.
+<code class="docutils literal notranslate"><span class="pre">shutdown_all_cameras()</span></code> stops everything cleanly on app shutdown.</p>
+</section>
+<section id="module-camera">
+<span id="api-reference"></span><h2>API reference<a class="headerlink" href="#module-camera" title="Link to this heading">¶</a></h2>
+<p>Camera Source Abstraction Layer</p>
 <dl class="simple">
 <dt>Supports RealSense camera backends:</dt><dd><ul class="simple">
 <li><p>Auto-detect: Automatically detects connected RealSense cameras</p></li>
@@ -302,21 +328,9 @@
 </dd></dl>
 
 <dl class="py method">
-<dt class="sig sig-object py" id="camera.CameraSource.clear_mp4_writer">
-<span class="sig-name descname"><span class="pre">clear_mp4_writer</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span></span></span><a class="reference internal" href="../_modules/camera.html#CameraSource.clear_mp4_writer"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#camera.CameraSource.clear_mp4_writer" title="Link to this definition">¶</a></dt>
-<dd><p>Detach MP4 writer and return total frames written.</p>
-</dd></dl>
-
-<dl class="py method">
 <dt class="sig sig-object py" id="camera.CameraSource.get_info">
 <span class="sig-name descname"><span class="pre">get_info</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span></span></span><a class="reference internal" href="../_modules/camera.html#CameraSource.get_info"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#camera.CameraSource.get_info" title="Link to this definition">¶</a></dt>
 <dd><p>Get camera information.</p>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="camera.CameraSource.get_mp4_frame_count">
-<span class="sig-name descname"><span class="pre">get_mp4_frame_count</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span></span></span><a class="reference internal" href="../_modules/camera.html#CameraSource.get_mp4_frame_count"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#camera.CameraSource.get_mp4_frame_count" title="Link to this definition">¶</a></dt>
-<dd><p>Get number of frames written to MP4 so far.</p>
 </dd></dl>
 
 <dl class="py method">
@@ -344,9 +358,17 @@
 </dd></dl>
 
 <dl class="py method">
-<dt class="sig sig-object py" id="camera.CameraSource.pause_mp4_writer">
-<span class="sig-name descname"><span class="pre">pause_mp4_writer</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/camera.html#CameraSource.pause_mp4_writer"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#camera.CameraSource.pause_mp4_writer" title="Link to this definition">¶</a></dt>
-<dd><p>Pause MP4 frame writing (for recording pause).</p>
+<dt class="sig sig-object py" id="camera.CameraSource.pause_recording">
+<span class="sig-name descname"><span class="pre">pause_recording</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="reference internal" href="../_modules/camera.html#CameraSource.pause_recording"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#camera.CameraSource.pause_recording" title="Link to this definition">¶</a></dt>
+<dd><p>Pause BAG recording using the RealSense recorder device.</p>
+<p>The pipeline stays running (capture thread continues) but frames
+are no longer written to the BAG file. Call resume_recording() to
+continue writing.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>True if pause was successful</p>
+</dd>
+</dl>
 </dd></dl>
 
 <dl class="py method">
@@ -364,15 +386,14 @@
 </dd></dl>
 
 <dl class="py method">
-<dt class="sig sig-object py" id="camera.CameraSource.resume_mp4_writer">
-<span class="sig-name descname"><span class="pre">resume_mp4_writer</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/camera.html#CameraSource.resume_mp4_writer"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#camera.CameraSource.resume_mp4_writer" title="Link to this definition">¶</a></dt>
-<dd><p>Resume MP4 frame writing (for recording resume).</p>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="camera.CameraSource.set_mp4_writer">
-<span class="sig-name descname"><span class="pre">set_mp4_writer</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">writer</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/camera.html#CameraSource.set_mp4_writer"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#camera.CameraSource.set_mp4_writer" title="Link to this definition">¶</a></dt>
-<dd><p>Attach an MP4 writer to the capture loop for decoupled recording.</p>
+<dt class="sig sig-object py" id="camera.CameraSource.resume_recording">
+<span class="sig-name descname"><span class="pre">resume_recording</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="reference internal" href="../_modules/camera.html#CameraSource.resume_recording"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#camera.CameraSource.resume_recording" title="Link to this definition">¶</a></dt>
+<dd><p>Resume a paused BAG recording.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>True if resume was successful</p>
+</dd>
+</dl>
 </dd></dl>
 
 <dl class="py method">
@@ -420,6 +441,9 @@ enabled. The same pipeline handles both streaming and recording.</p>
 <dt class="sig sig-object py" id="camera.get_camera_source">
 <span class="sig-prename descclassname"><span class="pre">camera.</span></span><span class="sig-name descname"><span class="pre">get_camera_source</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">camera_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#camera.CameraSource" title="camera.CameraSource"><span class="pre">CameraSource</span></a></span></span><a class="reference internal" href="../_modules/camera.html#get_camera_source"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#camera.get_camera_source" title="Link to this definition">¶</a></dt>
 <dd><p>Get or create camera source for given ID.</p>
+<p>Camera startup is launched in a background thread so this function
+returns immediately without blocking the calling request. Callers
+must check <code class="docutils literal notranslate"><span class="pre">camera.is_running()</span></code> before using the source.</p>
 </dd></dl>
 
 <dl class="py function">
@@ -428,6 +452,7 @@ enabled. The same pipeline handles both streaming and recording.</p>
 <dd><p>Release all camera resources. Called on app shutdown.</p>
 </dd></dl>
 
+</section>
 </section>
 
         </article>
@@ -440,18 +465,18 @@ enabled. The same pipeline handles both streaming and recording.</p>
                 <div class="context">
                   <span>Next</span>
                 </div>
-                <div class="title">API: Configuration</div>
+                <div class="title">Configuration</div>
               </div>
               <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
             </a>
-          <a class="prev-page" href="processing.html">
+          <a class="prev-page" href="main.html">
               <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
               <div class="page-info">
                 <div class="context">
                   <span>Previous</span>
                 </div>
                 
-                <div class="title">API: Processing (YOLOv8 &amp; Motion)</div>
+                <div class="title">Main Application (FastAPI)</div>
                 
               </div>
             </a>
@@ -485,7 +510,10 @@ enabled. The same pipeline handles both streaming and recording.</p>
         <div class="toc-tree-container">
           <div class="toc-tree">
             <ul>
-<li><a class="reference internal" href="#">API: Camera Interface (RealSense/Bag)</a><ul>
+<li><a class="reference internal" href="#">Camera Interface</a><ul>
+<li><a class="reference internal" href="#how-it-works">How it works</a></li>
+<li><a class="reference internal" href="#global-management">Global management</a></li>
+<li><a class="reference internal" href="#module-camera">API reference</a><ul>
 <li><a class="reference internal" href="#camera.CameraSource"><code class="docutils literal notranslate"><span class="pre">CameraSource</span></code></a><ul>
 <li><a class="reference internal" href="#camera.CameraSource.camera_id"><code class="docutils literal notranslate"><span class="pre">CameraSource.camera_id</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.mode"><code class="docutils literal notranslate"><span class="pre">CameraSource.mode</span></code></a></li>
@@ -493,17 +521,14 @@ enabled. The same pipeline handles both streaming and recording.</p>
 <li><a class="reference internal" href="#camera.CameraSource.frame_size"><code class="docutils literal notranslate"><span class="pre">CameraSource.frame_size</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.fps"><code class="docutils literal notranslate"><span class="pre">CameraSource.fps</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.realsense_serial"><code class="docutils literal notranslate"><span class="pre">CameraSource.realsense_serial</span></code></a></li>
-<li><a class="reference internal" href="#camera.CameraSource.clear_mp4_writer"><code class="docutils literal notranslate"><span class="pre">CameraSource.clear_mp4_writer()</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.get_info"><code class="docutils literal notranslate"><span class="pre">CameraSource.get_info()</span></code></a></li>
-<li><a class="reference internal" href="#camera.CameraSource.get_mp4_frame_count"><code class="docutils literal notranslate"><span class="pre">CameraSource.get_mp4_frame_count()</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.get_pipeline"><code class="docutils literal notranslate"><span class="pre">CameraSource.get_pipeline()</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.is_realsense"><code class="docutils literal notranslate"><span class="pre">CameraSource.is_realsense()</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.is_recording"><code class="docutils literal notranslate"><span class="pre">CameraSource.is_recording()</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.is_running"><code class="docutils literal notranslate"><span class="pre">CameraSource.is_running()</span></code></a></li>
-<li><a class="reference internal" href="#camera.CameraSource.pause_mp4_writer"><code class="docutils literal notranslate"><span class="pre">CameraSource.pause_mp4_writer()</span></code></a></li>
+<li><a class="reference internal" href="#camera.CameraSource.pause_recording"><code class="docutils literal notranslate"><span class="pre">CameraSource.pause_recording()</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.read"><code class="docutils literal notranslate"><span class="pre">CameraSource.read()</span></code></a></li>
-<li><a class="reference internal" href="#camera.CameraSource.resume_mp4_writer"><code class="docutils literal notranslate"><span class="pre">CameraSource.resume_mp4_writer()</span></code></a></li>
-<li><a class="reference internal" href="#camera.CameraSource.set_mp4_writer"><code class="docutils literal notranslate"><span class="pre">CameraSource.set_mp4_writer()</span></code></a></li>
+<li><a class="reference internal" href="#camera.CameraSource.resume_recording"><code class="docutils literal notranslate"><span class="pre">CameraSource.resume_recording()</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.start"><code class="docutils literal notranslate"><span class="pre">CameraSource.start()</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.start_recording"><code class="docutils literal notranslate"><span class="pre">CameraSource.start_recording()</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.stop"><code class="docutils literal notranslate"><span class="pre">CameraSource.stop()</span></code></a></li>
@@ -512,6 +537,8 @@ enabled. The same pipeline handles both streaming and recording.</p>
 </li>
 <li><a class="reference internal" href="#camera.get_camera_source"><code class="docutils literal notranslate"><span class="pre">get_camera_source()</span></code></a></li>
 <li><a class="reference internal" href="#camera.shutdown_all_cameras"><code class="docutils literal notranslate"><span class="pre">shutdown_all_cameras()</span></code></a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

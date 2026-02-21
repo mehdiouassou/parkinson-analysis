@@ -193,6 +193,7 @@
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../backend/main.html">API: Main Application (FastAPI)</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../backend/processing.html">API: Processing (YOLOv8 &amp; Motion)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/conversion.html">Conversion Pipeline</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../backend/camera.html">API: Camera Interface (RealSense/Bag)</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../backend/config.html">API: Configuration</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../backend/models.html">API: Data Models (Pydantic)</a></li>
@@ -291,6 +292,19 @@
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Request to start a new recording session.&quot;&quot;&quot;</span>
     <span class="n">patientName</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
     <span class="n">patientId</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span></div>
+
+
+
+<span class="c1"># =============================================================================</span>
+<span class="c1">#                           CONVERSION MODELS</span>
+<span class="c1"># =============================================================================</span>
+
+<div class="viewcode-block" id="ConversionStartRequest">
+<a class="viewcode-back" href="../backend/models.html#models.ConversionStartRequest">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">ConversionStartRequest</span><span class="p">(</span><span class="n">BaseModel</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Request to start BAG→MP4 conversion for a batch.&quot;&quot;&quot;</span>
+    <span class="n">batch_id</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">force</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>  <span class="c1"># Re-convert even if MP4 already exists</span></div>
 
 </pre></div>
         </article>
