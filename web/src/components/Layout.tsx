@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 
 const navItems = [
@@ -64,6 +64,7 @@ const MoonIcon = () => (
 );
 
 export default function Layout() {
+  const location = useLocation();
   const [darkMode, setDarkMode] = useState(() => {
     try {
       const saved = localStorage.getItem('darkMode');
@@ -112,6 +113,7 @@ export default function Layout() {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  reloadDocument={item.path === '/' || item.path === '/tagging'}
                   className={({ isActive }: { isActive: boolean }) =>
                     `flex items-center gap-1.5 px-3 py-2 rounded text-sm font-medium transition-colors ${
                       isActive
@@ -140,7 +142,7 @@ export default function Layout() {
 
       {/* Page content - scrollable, fills remaining space */}
       <main className="flex-1 overflow-auto px-4 xl:px-6 py-4">
-        <Outlet />
+        <Outlet key={location.pathname} />
       </main>
 
       {/* Footer - compact */}

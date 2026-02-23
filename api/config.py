@@ -24,6 +24,7 @@ Recording Behavior:
 """
 
 import os
+import time
 from pathlib import Path
 import threading
 
@@ -122,20 +123,16 @@ def detect_realsense_devices():
 
     devices = []
     try:
-        # Create context and query immediately - no retries, no waits.
-        # If the device is there, this is instant. If not, it returns empty.
         ctx = rs.context()
         device_list = list(ctx.query_devices())
 
         for dev in device_list:
             try:
                 serial = dev.get_info(rs.camera_info.serial_number)
-                # Deduplicate by serial
                 if any(d["serial"] == serial for d in devices):
                     continue
                     
                 name = dev.get_info(rs.camera_info.name)
-                # Check USB type (USB2 vs USB3 connection)
                 usb_type = "unknown"
                 if dev.supports(rs.camera_info.usb_type_descriptor):
                     usb_type = dev.get_info(rs.camera_info.usb_type_descriptor)
@@ -158,6 +155,7 @@ def detect_realsense_devices():
 # Detected devices cache (populated on first access)
 _detected_realsense = None
 _realsense_count = 0
+_detection_lock = threading.Lock()  # Prevents concurrent USB enumeration
 
 
 def get_realsense_count() -> int:
@@ -227,15 +225,50 @@ def get_camera_type(camera_id: int) -> str:
 
 
 def refresh_camera_detection():
-    """Force re-detection of cameras. Call when cameras may have changed."""
+    """Force re-detection of cameras.
+
+    Thread-safe: uses _detection_lock to guarantee only one thread
+    enumerates USB devices at a time.  Includes a USB settle delay
+    and retry loop because RealSense cameras need time after
+    pipeline.stop() before they can be re-enumerated.
+    """
     global _detected_realsense, _realsense_count
-    
-    print("[Config] Refreshing camera detection...")
-    new_devices = detect_realsense_devices()
-    
-    _detected_realsense = new_devices
-    _realsense_count = len(new_devices)
-    print("[Config] Camera detection refreshed")
+
+    # Only one thread may run detection at a time.  If another thread
+    # is already running, skip — the results will be updated by the
+    # thread that acquired the lock.
+    acquired = _detection_lock.acquire(blocking=False)
+    if not acquired:
+        print("[Config] Detection already in progress, skipping")
+        return
+
+    try:
+        print("[Config] Refreshing camera detection...")
+
+        # USB settle — cameras need time after pipeline.stop()
+        time.sleep(3.0)
+
+        previous_count = _realsense_count or 2  # assume 2 if never detected
+        max_retries = 4
+
+        for attempt in range(1, max_retries + 1):
+            new_devices = detect_realsense_devices()
+            if len(new_devices) >= previous_count or len(new_devices) >= 2:
+                _detected_realsense = new_devices
+                _realsense_count = len(new_devices)
+                print(f"[Config] Detection success: {_realsense_count} camera(s)")
+                return
+            if attempt < max_retries:
+                wait = 2.0 * attempt  # 2s, 4s, 6s
+                print(f"[Config] Found {len(new_devices)}/{previous_count} camera(s), "
+                      f"retry in {wait}s ({attempt}/{max_retries})")
+                time.sleep(wait)
+
+        _detected_realsense = new_devices
+        _realsense_count = len(new_devices)
+        print(f"[Config] Detection finished after retries: {_realsense_count} camera(s)")
+    finally:
+        _detection_lock.release()
 
 
 # Perform initial detection on module load

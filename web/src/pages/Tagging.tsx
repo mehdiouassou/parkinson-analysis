@@ -227,6 +227,24 @@ export default function Tagging() {
     if (videoRef.current && selectedFile) {
       setIsVideoLoading(true);
       videoRef.current.load();
+
+      // Safety timeout: if the video is still "loading" after 8 seconds,
+      // auto-retry the load. This handles the case where the first request
+      // stalls and onCanPlay/onLoadedMetadata never fire.
+      const timeout = setTimeout(() => {
+        if (mountedRef.current && videoRef.current) {
+          const vid = videoRef.current;
+          if (vid.readyState < 2) {
+            console.warn('[Tagging] Video load timeout — retrying');
+            vid.load();
+          } else {
+            // readyState >= HAVE_CURRENT_DATA — video is fine, just dismiss spinner
+            setIsVideoLoading(false);
+          }
+        }
+      }, 8000);
+
+      return () => clearTimeout(timeout);
     }
   }, [selectedFile]);
 
@@ -389,10 +407,11 @@ export default function Tagging() {
             ref={videoRef}
             src={`${API_URL}/videos/${selectedFile}`}
             className="w-full h-full object-contain"
-            preload="metadata"
+            preload="auto"
             onLoadStart={() => setIsVideoLoading(true)}
             onLoadedMetadata={() => { if (videoRef.current) { setDuration(videoRef.current.duration); setIsVideoLoading(false); } }}
             onCanPlay={() => setIsVideoLoading(false)}
+            onPlaying={() => setIsVideoLoading(false)}
             onTimeUpdate={() => { if (videoRef.current) setCurrentTime(videoRef.current.currentTime); }}
             onWaiting={() => setIsVideoLoading(true)}
             onEnded={() => setIsPlaying(false)}
@@ -526,11 +545,10 @@ export default function Tagging() {
   // Controls bar content — shared between normal and fullscreen
   const controlsContent = (dark = false) => {
     const divider = <div className={`h-6 w-px hidden lg:block ${dark ? 'bg-white/10' : 'bg-clinical-border dark:bg-clinical-dark-border'}`} />;
-    const secondaryBtn = `px-2 py-1 text-sm rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-0.5 ${
-      dark
-        ? 'bg-white/10 hover:bg-white/20 text-white disabled:bg-white/5'
-        : 'bg-clinical-neutral hover:bg-clinical-neutral/80 text-white disabled:bg-clinical-border dark:disabled:bg-clinical-dark-border disabled:text-clinical-text-secondary'
-    }`;
+    const secondaryBtn = `px-2 py-1 text-sm rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-0.5 ${dark
+      ? 'bg-white/10 hover:bg-white/20 text-white disabled:bg-white/5'
+      : 'bg-clinical-neutral hover:bg-clinical-neutral/80 text-white disabled:bg-clinical-border dark:disabled:bg-clinical-dark-border disabled:text-clinical-text-secondary'
+      }`;
     return (
       <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
         {/* Log action buttons */}
@@ -562,13 +580,12 @@ export default function Tagging() {
               key={rate}
               onClick={() => changePlaybackRate(rate)}
               disabled={!selectedFile}
-              className={`px-2 py-1 text-sm rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                playbackRate === rate
-                  ? 'bg-clinical-blue text-white'
-                  : dark
-                    ? 'bg-white/10 hover:bg-white/20 text-white/80 disabled:bg-white/5'
-                    : 'bg-clinical-bg dark:bg-clinical-dark-bg border border-clinical-border dark:border-clinical-dark-border text-clinical-text-secondary dark:text-clinical-text-dark-secondary hover:bg-clinical-border dark:hover:bg-clinical-dark-border'
-              }`}
+              className={`px-2 py-1 text-sm rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${playbackRate === rate
+                ? 'bg-clinical-blue text-white'
+                : dark
+                  ? 'bg-white/10 hover:bg-white/20 text-white/80 disabled:bg-white/5'
+                  : 'bg-clinical-bg dark:bg-clinical-dark-bg border border-clinical-border dark:border-clinical-dark-border text-clinical-text-secondary dark:text-clinical-text-dark-secondary hover:bg-clinical-border dark:hover:bg-clinical-dark-border'
+                }`}
             >{rate}x</button>
           ))}
         </div>
@@ -582,9 +599,8 @@ export default function Tagging() {
           <button
             onClick={handlePlayPause}
             disabled={!selectedFile}
-            className={`px-3 py-1 text-white text-sm rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-0.5 ${
-              isPlaying ? 'bg-clinical-warning hover:bg-clinical-warning/80' : 'bg-clinical-ready hover:bg-clinical-ready-hover'
-            }`}
+            className={`px-3 py-1 text-white text-sm rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-0.5 ${isPlaying ? 'bg-clinical-warning hover:bg-clinical-warning/80' : 'bg-clinical-ready hover:bg-clinical-ready-hover'
+              }`}
           >
             {isPlaying ? <><PauseIcon /> Pause</> : <><PlayIcon /> Play</>}
           </button>
@@ -823,7 +839,7 @@ export default function Tagging() {
           >
             <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-clinical-border dark:bg-clinical-dark-border group-hover:bg-clinical-blue group-active:bg-clinical-blue transition-colors" />
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-              {[0,1,2].map(i => <div key={i} className="w-0.5 h-2 bg-clinical-blue rounded-full" />)}
+              {[0, 1, 2].map(i => <div key={i} className="w-0.5 h-2 bg-clinical-blue rounded-full" />)}
             </div>
           </div>
         )}

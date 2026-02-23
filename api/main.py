@@ -67,6 +67,8 @@ from models import (
 )
 from camera import (
     get_camera_source,
+    startup_all_cameras,
+    restart_all_cameras,
     shutdown_all_cameras,
     camera_sources
 )
@@ -104,6 +106,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def on_startup():
+    """Start all detected cameras on server boot."""
+    startup_all_cameras()
+
+
+@app.on_event("shutdown")
+def on_shutdown():
+    """Release all camera resources on server shutdown."""
+    shutdown_all_cameras()
 
 
 # =============================================================================
@@ -159,33 +173,41 @@ def get_physical_camera_id(logical_id: int) -> int:
 # =============================================================================
 
 STREAM_FPS_IDLE = 30       # Preview FPS when not recording (smooth enough)
-STREAM_FPS_RECORDING = 15  # Preview FPS during recording (save CPU/bandwidth for BAG)
+STREAM_FPS_RECORDING = 10  # Preview FPS during recording (save CPU/bandwidth for BAG)
 
 
 def gen_frames(camera_id: int):
     """
-    Generate frames from camera for MJPEG streaming.
+    Generate MJPEG frames from a camera.
 
-    Handles:
-        - Reading frames from camera source (via physical ID after swap)
-        - JPEG encoding for streaming
-        - FPS throttling: 30 fps idle, 15 fps during recording to save
-          CPU/bandwidth on Jetson AGX Orin with dual RealSense cameras
-        - Graceful stream termination when camera goes offline so the browser
-          fires onError and the frontend can retry with exponential back-off.
-
-    MP4 recording is handled directly by the capture thread (decoupled).
+    This stream lives as long as the HTTP connection does — it NEVER
+    closes voluntarily.  If the camera is offline or restarting, the
+    generator yields a placeholder frame to keep the connection alive
+    and allow detection of client disconnects (via write errors).
     """
     last_good_frame = None
-    # Count consecutive iterations where the camera is offline or delivering
-    # no frames.  Once the threshold is exceeded we close the stream so the
-    # frontend's onError handler fires and retries with exponential back-off.
-    offline_ticks = 0
-    MAX_OFFLINE_TICKS = 60  # ~2 s at 30 fps; camera hiccups are tolerated
+
+    # Pre-render a placeholder frame to yield when camera is not ready
+    # This prevents the generator from blocking indefinitely and allows
+    # the server to detect if the client has disconnected.
+    placeholder = np.zeros((480, 848, 3), dtype=np.uint8)
+    # Dark grey background
+    placeholder[:] = (20, 20, 20)
+    # Centered text
+    text = "WAITING FOR CAMERA..."
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 1.0
+    thickness = 2
+    (text_w, text_h), _ = cv2.getTextSize(text, font, font_scale, thickness)
+    text_x = (848 - text_w) // 2
+    text_y = (480 + text_h) // 2
+    cv2.putText(placeholder, text, (text_x, text_y), font, font_scale, (150, 150, 150), thickness)
+    
+    _, ph_buffer = cv2.imencode('.jpg', placeholder, [cv2.IMWRITE_JPEG_QUALITY, 60])
+    ph_bytes = (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + ph_buffer.tobytes() + b'\r\n')
 
     while True:
-        # Determine target FPS based on recording state — checked every frame
-        # so transitions are picked up immediately without restarting the stream.
+        # Determine target FPS based on recording state
         is_recording = recording_state["status"] in ("recording", "warming_up", "paused")
         target_fps = STREAM_FPS_RECORDING if is_recording else STREAM_FPS_IDLE
         frame_interval = 1.0 / target_fps
@@ -197,36 +219,35 @@ def gen_frames(camera_id: int):
         camera = get_camera_source(physical_id)
 
         frame = None
-        camera_running = camera.is_running()
 
-        if camera_running:
+        if camera.is_running():
             ret, frame, depth = camera.read()
             if ret and frame is not None:
                 last_good_frame = frame
-                offline_ticks = 0
             else:
-                # Brief read failure — serve last good frame
                 frame = last_good_frame
         else:
-            # Camera not running (starting up or disconnected)
+            # Camera not running — serve last good frame (or wait)
             frame = last_good_frame
-            offline_ticks += 1
-
-        if offline_ticks > MAX_OFFLINE_TICKS:
-            # Camera has been offline too long — close the MJPEG stream.
-            # The browser detects the closed connection and fires onError on
-            # the <img> tag, which triggers the frontend's retry back-off.
-            break
 
         if frame is None:
-            # No frame yet (camera still initialising) — pause briefly
-            time.sleep(0.033)
+            # No frame yet (camera still starting) — serve placeholder
+            try:
+                yield ph_bytes
+                # Sleep a bit longer than normal frame interval to save bandwidth
+                time.sleep(0.5)
+            except (GeneratorExit, OSError):
+                # Client disconnected — clean exit
+                break
             continue
 
-        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
-        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+        try:
+            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+            yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+        except (GeneratorExit, OSError):
+            # Client disconnected (navigated away) — clean exit
+            break
 
-        # Sleep precisely to hit the target FPS instead of a fixed 15ms
         elapsed = time.monotonic() - frame_start
         sleep_time = frame_interval - elapsed
         if sleep_time > 0:
@@ -242,20 +263,10 @@ def video_feed(camera_id: int):
     """
     Stream MJPEG video from camera 0 or 1.
 
-    Returns HTTP 503 when the camera is not yet running so the browser's
-    <img> onError fires immediately and the frontend can retry with
-    exponential back-off without keeping a long-lived connection alive.
+    Always returns a StreamingResponse — never 503.  If the camera
+    isn’t running yet, gen_frames() will wait until it comes online
+    and start streaming frames as soon as they’re available.
     """
-    physical_id = get_physical_camera_id(camera_id)
-    camera = get_camera_source(physical_id)
-
-    if not camera.is_running():
-        return JSONResponse(
-            status_code=503,
-            content={"error": f"Camera {camera_id} not available"},
-            headers={"Retry-After": "2"},
-        )
-
     return StreamingResponse(
         gen_frames(camera_id),
         media_type="multipart/x-mixed-replace; boundary=frame"
@@ -266,76 +277,121 @@ def video_feed(camera_id: int):
 #                           RECORDING ROUTES
 # =============================================================================
 
-def _start_camera_recording(cam_id: int, timestamp_str: str, result_dict: dict):
+def _prepare_camera_recording(cam_id: int, timestamp_str: str, prepared_dict: dict):
     """
-    Start BAG-only recording for a single logical camera.
+    Phase 1: Prepare a camera for recording (SLOW, ~1-3s per camera).
 
-    Called in parallel threads (one per camera) so both cameras start at
-    nearly the same time, minimising the inter-camera frame offset.
+    Stops the current pipeline and builds a new config with recording
+    enabled. Does NOT start the new pipeline — that happens in Phase 2
+    (commit) after all cameras have been prepared.
 
-    Captures high-precision timestamps (time.monotonic) before and after
-    pipeline restart so the inter-camera start offset can be computed.
-
-    Result is stored in result_dict[cam_id] for the caller to inspect.
+    Called in parallel threads so all cameras prepare simultaneously.
+    Result is stored in prepared_dict[cam_id].
     """
     physical_id = get_physical_camera_id(cam_id)
     camera = get_camera_source(physical_id)
 
     if not camera.is_running():
         print(f"[Recording] Logical cam {cam_id} (physical {physical_id}) offline, skipping")
-        result_dict[cam_id] = None
+        prepared_dict[cam_id] = None
         return
 
     camera_type = camera.camera_type
     actual_fps = camera.fps
     frame_size = camera.frame_size or (848, 480)
 
-    print(f"[Recording] Logical cam {cam_id} (physical {physical_id}): {camera_type} {frame_size}@{actual_fps}fps")
+    print(f"[Recording] Preparing logical cam {cam_id} (physical {physical_id}): {camera_type} {frame_size}@{actual_fps}fps")
 
     bag_filename = f"{timestamp_str}_camera{cam_id + 1}.bag"
     bag_filepath = str(RECORDINGS_DIR / bag_filename)
 
-    # Capture precise timestamps around recording start for sync analysis
-    t_before = time.monotonic()
-    bag_success = camera.start_recording(bag_filepath)
-    t_after = time.monotonic()
+    t_prepare_start = time.monotonic()
+    prepared = camera.prepare_recording(bag_filepath)
+    t_prepare_end = time.monotonic()
+    prepare_ms = round((t_prepare_end - t_prepare_start) * 1000, 1)
+
+    if prepared is not None:
+        print(f"[Recording] Cam {cam_id} prepared in {prepare_ms}ms")
+    else:
+        print(f"[Recording] Cam {cam_id} prepare FAILED")
+
+    prepared_dict[cam_id] = {
+        "prepared": prepared,
+        "bag_filename": bag_filename,
+        "camera_type": camera_type,
+        "actual_fps": actual_fps,
+        "prepare_ms": prepare_ms,
+    }
+
+
+def _commit_camera_recording(cam_id: int, prepared_info: dict, barrier: threading.Barrier, result_dict: dict):
+    """
+    Phase 2: Commit recording start for a camera (FAST, ~100-300ms).
+
+    Waits at the barrier so all cameras start simultaneously, then
+    calls commit_recording() to start the pipeline.
+    """
+    physical_id = get_physical_camera_id(cam_id)
+    camera = get_camera_source(physical_id)
+    prepared = prepared_info.get("prepared")
+
+    if prepared is None:
+        result_dict[cam_id] = None
+        try:
+            barrier.wait(timeout=10)
+        except threading.BrokenBarrierError:
+            pass
+        return
+
+    try:
+        # ── Synchronisation point ──────────────────────────────────────
+        # All cameras wait here until every camera is ready to start.
+        barrier.wait(timeout=10)
+        # ──────────────────────────────────────────────────────────────
+    except threading.BrokenBarrierError:
+        print(f"[Recording] Barrier broken for cam {cam_id}")
+        result_dict[cam_id] = None
+        return
+
+    t_commit_start = time.monotonic()
+    bag_success = camera.commit_recording(prepared)
+    t_commit_end = time.monotonic()
+    commit_ms = round((t_commit_end - t_commit_start) * 1000, 1)
 
     recording_started_at = datetime.now().isoformat()
 
     if bag_success:
-        print(f"[Recording] BAG started for logical cam {cam_id}: {bag_filepath} "
-              f"(pipeline restart took {(t_after - t_before)*1000:.0f}ms)")
+        print(f"[Recording] Cam {cam_id} committed in {commit_ms}ms")
     else:
-        print(f"[Recording] BAG failed for logical cam {cam_id}")
+        print(f"[Recording] Cam {cam_id} commit FAILED")
 
     result_dict[cam_id] = {
-        "bag_filename": bag_filename if bag_success else None,
+        "bag_filename": prepared_info["bag_filename"] if bag_success else None,
         "bag_success": bag_success,
-        "camera_type": camera_type,
-        "actual_fps": actual_fps,
+        "camera_type": prepared_info["camera_type"],
+        "actual_fps": prepared_info["actual_fps"],
         # Sync tracking — monotonic timestamps for inter-camera offset calculation
-        "recording_start_mono": t_after if bag_success else None,
+        "recording_start_mono": t_commit_end if bag_success else None,
         "recording_start_iso": recording_started_at if bag_success else None,
-        "pipeline_restart_ms": round((t_after - t_before) * 1000, 1),
+        "pipeline_restart_ms": round(prepared_info["prepare_ms"] + commit_ms, 1),
+        "commit_ms": commit_ms,
     }
 
 
 def _initialize_recording():
     """
-    Start BAG recording for all active cameras in parallel.
+    Start BAG recording for all active cameras using barrier synchronisation.
 
-    Both cameras are started in PARALLEL threads so their recording pipelines
-    initialise at the same time, minimising the inter-camera start offset.
+    Two-phase start:
+        Phase 1 (PREPARE): Both cameras stop their old pipelines and build
+                           new configs in PARALLEL. This is the slow part
+                           (~1-3s per camera) but runs concurrently.
+        Phase 2 (COMMIT):  Both cameras wait at a threading.Barrier, then
+                           call pipeline.start() simultaneously. This is
+                           fast (~100-300ms) and synchronised.
 
-    Performs slow operations (pipeline restart) WITHOUT holding the recording
-    lock to avoid blocking the MJPEG streams.
-
-    Orphan handling: if only one camera is running, recording is only
-    started for that camera. No empty files are created for missing cameras.
-
-    File naming uses the LOGICAL camera ID (not the physical one):
-        Logical 0 → _camera1.bag  (Front/Sagittale)
-        Logical 1 → _camera2.bag  (Side/Frontale)
+    This reduces the inter-camera start offset from ~2s (sequential) to
+    <100ms (the difference in pipeline.start() time between cameras).
     """
     with recording_lock:
         if recording_state["status"] != "warming_up":
@@ -343,29 +399,58 @@ def _initialize_recording():
             return
         timestamp_str = recording_state["timestamp_str"]
 
-    # Launch both cameras in PARALLEL to minimise start-time offset
-    cam_info: dict = {}
-    threads = []
+    # ── Phase 1: PREPARE both cameras in parallel ──
+    prepared_dict: dict = {}
+    prep_threads = []
     for cam_id in [0, 1]:
         t = threading.Thread(
-            target=_start_camera_recording,
-            args=(cam_id, timestamp_str, cam_info),
+            target=_prepare_camera_recording,
+            args=(cam_id, timestamp_str, prepared_dict),
             daemon=True,
         )
-        threads.append(t)
+        prep_threads.append(t)
         t.start()
 
-    for t in threads:
+    for t in prep_threads:
         t.join()
 
-    # Drop offline cameras (stored as None)
+    # Filter out cameras that couldn't prepare (offline or failed)
+    ready_cams = {
+        cid: info for cid, info in prepared_dict.items()
+        if info is not None and info.get("prepared") is not None
+    }
+
+    if not ready_cams:
+        print("[Recording] No cameras ready for recording")
+        with recording_lock:
+            if recording_state["status"] == "warming_up":
+                recording_state["status"] = "idle"
+        return
+
+    # ── Phase 2: COMMIT all cameras simultaneously via barrier ──
+    barrier = threading.Barrier(len(ready_cams))
+    cam_info: dict = {}
+    commit_threads = []
+    for cam_id, info in ready_cams.items():
+        t = threading.Thread(
+            target=_commit_camera_recording,
+            args=(cam_id, info, barrier, cam_info),
+            daemon=True,
+        )
+        commit_threads.append(t)
+        t.start()
+
+    for t in commit_threads:
+        t.join()
+
+    # Drop cameras that failed to commit
     cam_info = {k: v for k, v in cam_info.items() if v is not None}
 
     with recording_lock:
         if recording_state["status"] != "warming_up":
             # Cancelled during startup — stop any BAG pipelines that started
             for cam_id, info in cam_info.items():
-                if info["bag_success"]:
+                if info.get("bag_success"):
                     try:
                         get_camera_source(get_physical_camera_id(cam_id)).stop_recording()
                     except Exception:
@@ -401,7 +486,7 @@ def _initialize_recording():
 
         recording_state["status"] = "recording"
         recording_state["start_time"] = datetime.now()
-        print("[Recording] Recording started (both cameras initialised in parallel)")
+        print(f"[Recording] Recording started (barrier-synced, offset: {inter_camera_offset_ms}ms)")
 
 
 @app.post("/recording/start")
@@ -601,6 +686,7 @@ def stop_recording():
         t.join()
 
     # Save metadata sidecar for each BAG file — includes sync tracking data
+    # and hardware timestamps for post-hoc alignment
     for bag_file in bag_files:
         base_name = bag_file.replace('.bag', '')
         metadata_file = f"{base_name}_metadata.json"
@@ -609,6 +695,13 @@ def stop_recording():
         cam_id = 0 if '_camera1' in base_name else 1 if '_camera2' in base_name else -1
         cam_type = camera_types.get(cam_id, CAMERA_TYPE_REALSENSE)
         camera_view = "Front" if cam_id == 0 else "Side"
+
+        # Read hardware timestamps from camera for post-hoc sync alignment
+        physical_cam = get_camera_source(get_physical_camera_id(cam_id))
+        first_hw_ts = physical_cam.get_first_hw_timestamp()
+        last_hw_ts = physical_cam.get_last_hw_timestamp()
+        hw_ts_domain = physical_cam.get_hw_timestamp_domain()
+        frames_at_stop = physical_cam.get_recording_frame_count()
 
         metadata_content = {
             "patient_name": patient_name,
@@ -624,6 +717,11 @@ def stop_recording():
             "recording_stopped_at": stop_timestamps.get(cam_id),
             "inter_camera_offset_ms": inter_camera_offset_ms,
             "pipeline_restart_ms": pipeline_restart_ms.get(cam_id, 0),
+            # Hardware timestamps for post-hoc alignment between cameras
+            "first_hw_timestamp": first_hw_ts,
+            "last_hw_timestamp": last_hw_ts,
+            "hw_timestamp_domain": hw_ts_domain,
+            "frames_at_stop": frames_at_stop,
             # MP4 fields — populated by conversion.py after BAG→MP4 conversion
             "mp4_file": None,
             "mp4_frames": None,
@@ -736,19 +834,31 @@ def get_cameras_info():
 @app.post("/cameras/refresh")
 def refresh_cameras():
     """
-    Force re-detection of cameras.
-    Call this if you've plugged in or unplugged cameras.
-    """
-    # 1. Stop all cameras first to release USB handles
-    shutdown_all_cameras()
-    
-    # 2. Refresh detection logic (simple, fast, no retries)
-    refresh_camera_detection()
+    Re-read camera info without stopping or restarting cameras.
 
-    # 3. Return result
+    Use this to update the frontend's display of camera metadata
+    (serial numbers, USB type, running status).  Non-destructive.
+    """
     detected = get_detected_cameras()
     return {
-        "message": "Cameras refreshed",
+        "message": "Camera info refreshed",
+        "detected": detected
+    }
+
+
+@app.post("/cameras/restart")
+def restart_cameras():
+    """
+    Hard restart: stop all cameras → USB settle → re-detect → restart.
+
+    This is the "nuclear option" triggered ONLY by the user clicking
+    the Restart button.  Takes several seconds due to USB settle time.
+    """
+    restart_all_cameras()
+
+    detected = get_detected_cameras()
+    return {
+        "message": f"Cameras restarted — {len(detected)} camera(s) found",
         "detected": detected
     }
 
@@ -949,6 +1059,9 @@ def get_frame_comparison(batch_id: str):
             "bag_frames": None,
             "mp4_frames": None,
             "mp4_frames_from_sidecar": None,
+            "bag_expected_frames": None,
+            "bag_dropped_frames": None,
+            "real_fps": None,
             "frame_difference": None,
             "drop_rate_percent": None,
             "fps": DEFAULT_FPS,
@@ -967,6 +1080,15 @@ def get_frame_comparison(batch_id: str):
                 cam_result["recording_stopped_at"] = meta.get("recording_stopped_at")
                 cam_result["inter_camera_offset_ms"] = meta.get("inter_camera_offset_ms", 0)
                 cam_result["pipeline_restart_ms"] = meta.get("pipeline_restart_ms", 0)
+                # True hardware FPS and drops
+                cam_result["bag_expected_frames"] = meta.get("expected_frames")
+                cam_result["bag_dropped_frames"] = meta.get("dropped_frames")
+                cam_result["real_fps"] = meta.get("real_fps")
+                # Hardware timestamps for post-hoc alignment
+                cam_result["first_hw_timestamp"] = meta.get("first_hw_timestamp")
+                cam_result["last_hw_timestamp"] = meta.get("last_hw_timestamp")
+                cam_result["hw_timestamp_domain"] = meta.get("hw_timestamp_domain")
+                cam_result["frames_at_stop"] = meta.get("frames_at_stop")
             except Exception:
                 pass
 
@@ -1112,63 +1234,28 @@ def get_frame_comparison(batch_id: str):
 @app.get("/videos/{video_name}")
 def get_video(video_name: str, request: Request):
     """
-    Serve video with byte-range support for streaming.
+    Serve video file with range request support.
 
-    Always advertises Accept-Ranges so browsers can seek immediately
-    without downloading the entire file first.
+    Uses Starlette's FileResponse which handles:
+        - Accept-Ranges headers automatically
+        - Byte-range requests for seeking
+        - Kernel-level sendfile() for efficient I/O
+        - No Python thread blocking during transfer
     """
     video_path = RECORDINGS_DIR / video_name
 
     if not video_path.exists():
         return JSONResponse(status_code=404, content={"error": "Video not found"})
 
-    file_size = video_path.stat().st_size
-    range_header = request.headers.get('range')
-
     media_type = "video/mp4" if video_name.endswith('.mp4') else "application/octet-stream"
 
-    def chunk_generator(path, start_pos, end_pos, chunk_size=1024*1024):
-        with open(path, "rb") as f:
-            f.seek(start_pos)
-            remaining = end_pos - start_pos + 1
-            while remaining > 0:
-                read_size = min(chunk_size, remaining)
-                data = f.read(read_size)
-                if not data:
-                    break
-                yield data
-                remaining -= len(data)
-
-    if not range_header:
-        # No Range header — return full file but advertise range support
-        # so the browser knows it can seek without re-downloading.
-        return StreamingResponse(
-            chunk_generator(video_path, 0, file_size - 1),
-            status_code=200,
-            headers={
-                "Accept-Ranges": "bytes",
-                "Content-Length": str(file_size),
-                "Content-Type": media_type,
-            }
-        )
-
-    range_str = range_header.replace("bytes=", "")
-    parts = range_str.split("-")
-    start = int(parts[0]) if parts[0] else 0
-    end = int(parts[1]) if parts[1] else file_size - 1
-
-    start = max(0, start)
-    end = min(end, file_size - 1)
-
-    return StreamingResponse(
-        chunk_generator(video_path, start, end),
-        status_code=206,
-        headers={
-            "Content-Range": f"bytes {start}-{end}/{file_size}",
-            "Accept-Ranges": "bytes",
-            "Content-Length": str(end - start + 1),
-            "Content-Type": media_type,
-        }
+    # FileResponse handles range requests, Accept-Ranges, and Content-Length
+    # automatically via Starlette internals. Much more efficient than our
+    # custom chunk_generator + StreamingResponse approach.
+    return FileResponse(
+        path=str(video_path),
+        media_type=media_type,
+        filename=video_name,
     )
 
 

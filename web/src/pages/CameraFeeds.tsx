@@ -29,10 +29,10 @@ export default function CameraFeeds() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [detectedCount, setDetectedCount] = useState<number | null>(null);
 
-  // Camera connection status: 'connecting' | 'connected' | 'reconnecting' | 'disconnected'
-  const [camStatus, setCamStatus] = useState<Record<string, string>>({
-    cam0: 'connecting',
-    cam1: 'connecting',
+  // Camera status: tracks only errors. Null = normal (streaming or waiting for first frame)
+  const [camOffline, setCamOffline] = useState<Record<string, boolean>>({
+    cam0: false,
+    cam1: false,
   });
 
   // Recording live metrics (populated by status polling)
@@ -45,9 +45,11 @@ export default function CameraFeeds() {
   const abortRef = useRef<AbortController | null>(null);
   // Track mounted state to prevent state updates after unmount
   const mountedRef = useRef(true);
-  // Track camera img retry counts to prevent infinite retry loops
-  const camRetryCount = useRef<Record<string, number>>({});
-  const MAX_CAM_RETRIES = 10;
+  const [isRestarting, setIsRestarting] = useState(false);
+
+  // Refs for MJPEG <img> tags — used to explicitly close connections on unmount
+  const cam0Ref = useRef<HTMLImageElement>(null);
+  const cam1Ref = useRef<HTMLImageElement>(null);
 
   const { showToast } = useToast();
   const showToastRef = useRef(showToast);
@@ -72,8 +74,17 @@ export default function CameraFeeds() {
     return () => {
       mountedRef.current = false;
       abortRef.current?.abort();
+      // Force-close MJPEG connections so old gen_frames threads exit
+      if (cam0Ref.current) cam0Ref.current.src = '';
+      if (cam1Ref.current) cam1Ref.current.src = '';
     };
   }, []);
+
+  // Connect MJPEG streams — runs on mount and when cameraKey changes (restart)
+  useEffect(() => {
+    if (cam0Ref.current) cam0Ref.current.src = `${API_URL}/camera/0?t=${cameraKey}`;
+    if (cam1Ref.current) cam1Ref.current.src = `${API_URL}/camera/1?t=${cameraKey}`;
+  }, [cameraKey]);
 
   const formatDuration = (seconds: number) => {
     const m = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -261,8 +272,6 @@ export default function CameraFeeds() {
       }
       setRecordingState('warming_up');
       showToast('Warming up cameras…', 'success');
-      // Reset camera retry counts on new recording
-      camRetryCount.current = {};
     } catch (error) {
       console.error('Failed to start recording:', error);
       if (mountedRef.current) {
@@ -337,8 +346,8 @@ export default function CameraFeeds() {
       const data = await res.json();
       if (!mountedRef.current) return;
       setRecordingState('idle');
-      if (data.mp4_files && data.mp4_files.length > 0) {
-        showToast(`Saved ${data.mp4_files.length} recording(s)`, 'success');
+      if (data.bag_files && data.bag_files.length > 0) {
+        showToast(`Saved ${data.bag_files.length} recording(s)`, 'success');
       }
     } catch (error) {
       console.error('Failed to stop recording:', error);
@@ -352,41 +361,25 @@ export default function CameraFeeds() {
   };
 
   const handleRefresh = async () => {
-    // Refresh runs independently — doesn't block record/pause/stop/swap and
-    // those actions don't block refresh.  Only one refresh at a time is allowed.
+    // Lightweight: just re-read camera info, no stop/restart
     if (refreshInFlight.current) return;
-    // Refuse to refresh while a recording is active (cameras would be stopped).
-    if (recordingState !== 'idle') {
-      showToast('Cannot refresh cameras while recording', 'error');
-      return;
-    }
     refreshInFlight.current = true;
     setIsRefreshing(true);
 
     try {
-      showToast('Refreshing cameras…', 'info');
+      const res = await fetch(`${API_URL}/cameras/refresh`, { method: 'POST' });
+      if (!res.ok) throw new Error('Refresh failed');
 
-      // Step 1: tell backend to shut down cameras and re-detect.
-      const refreshRes = await fetch(`${API_URL}/cameras/refresh`, { method: 'POST' });
-      if (!refreshRes.ok) throw new Error('Refresh failed');
-
-      // Step 2: re-fetch /cameras/info — this also triggers background camera
-      // restart on the backend (get_camera_source() is called per camera).
       const infoRes = await fetch(`${API_URL}/cameras/info`);
-      if (!infoRes.ok) throw new Error('Failed to get camera info after refresh');
+      if (!infoRes.ok) throw new Error('Failed to get camera info');
       const infoData = await infoRes.json();
 
       if (mountedRef.current) {
         setCamerasInfo(infoData.cameras || []);
         const found = Object.keys(infoData.detected_devices || {}).length;
         setDetectedCount(found);
-        showToast(`Found ${found} camera${found !== 1 ? 's' : ''}`, found > 0 ? 'success' : 'info');
-
-        // Reset retry counters so the feeds reconnect from scratch instead of
-        // staying in the "disconnected" state from the shutdown above.
-        camRetryCount.current = { cam0: 0, cam1: 0 };
-        setCamStatus({ cam0: 'connecting', cam1: 'connecting' });
         setCameraKey(Date.now());
+        showToast(`${found} camera${found !== 1 ? 's' : ''} detected`, found > 0 ? 'success' : 'info');
       }
     } catch (error) {
       console.error('Failed to refresh cameras:', error);
@@ -394,6 +387,42 @@ export default function CameraFeeds() {
     } finally {
       if (mountedRef.current) setIsRefreshing(false);
       refreshInFlight.current = false;
+    }
+  };
+
+  const handleRestart = async () => {
+    // Hard restart: stop cameras, USB settle, re-detect, restart
+    if (isRestarting || recordingState !== 'idle') return;
+    setIsRestarting(true);
+    setCamOffline({ cam0: false, cam1: false });
+
+    try {
+      showToast('Restarting cameras…', 'info');
+      const res = await fetch(`${API_URL}/cameras/restart`, { method: 'POST' });
+      if (!res.ok) throw new Error('Restart failed');
+      const data = await res.json();
+
+      // Re-fetch camera info
+      const infoRes = await fetch(`${API_URL}/cameras/info`);
+      if (infoRes.ok) {
+        const infoData = await infoRes.json();
+        if (mountedRef.current) {
+          setCamerasInfo(infoData.cameras || []);
+          const found = Object.keys(infoData.detected_devices || {}).length;
+          setDetectedCount(found);
+        }
+      }
+
+      if (mountedRef.current) {
+        // Force reconnect the <img> tags by changing the key
+        setCameraKey(Date.now());
+        showToast(data.message || 'Cameras restarted', 'success');
+      }
+    } catch (error) {
+      console.error('Failed to restart cameras:', error);
+      if (mountedRef.current) showToast('Failed to restart cameras', 'error');
+    } finally {
+      if (mountedRef.current) setIsRestarting(false);
     }
   };
 
@@ -422,58 +451,56 @@ export default function CameraFeeds() {
               className="w-24 px-2 py-1.5 text-sm bg-clinical-bg dark:bg-clinical-dark-bg border border-clinical-border dark:border-clinical-dark-border rounded text-clinical-text-primary dark:text-clinical-text-dark disabled:opacity-50"
             />
           </div>
-          
+
           {/* Divider */}
           <div className="h-6 w-px bg-clinical-border dark:bg-clinical-dark-border" />
-          
+
           {/* Date/Time */}
           <div className="flex flex-col items-start leading-tight">
             <span className="text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary">{currentDate}</span>
             <span className="text-sm font-mono font-semibold text-clinical-blue">{currentTime}</span>
           </div>
-          
+
           {/* Divider */}
           <div className="h-6 w-px bg-clinical-border dark:bg-clinical-dark-border" />
-          
+
           {/* Status section — badge + live metrics */}
           <div className="flex items-center gap-3 flex-wrap">
             <span
-              className={`inline-flex items-center px-3 py-1 rounded text-sm font-medium ${
-                recordingState === 'recording'
-                  ? 'bg-clinical-record/10 text-clinical-record border border-clinical-record/30'
-                  : recordingState === 'paused'
+              className={`inline-flex items-center px-3 py-1 rounded text-sm font-medium ${recordingState === 'recording'
+                ? 'bg-clinical-record/10 text-clinical-record border border-clinical-record/30'
+                : recordingState === 'paused'
                   ? 'bg-clinical-warning/10 text-clinical-warning border border-clinical-warning/30'
                   : recordingState === 'warming_up'
-                  ? 'bg-amber-500/10 text-amber-500 border border-amber-500/30'
-                  : recordingState === 'initializing' || recordingState === 'stopping'
-                  ? 'bg-clinical-warning/10 text-clinical-warning border border-clinical-warning/30'
-                  : 'bg-clinical-ready/10 text-clinical-ready border border-clinical-ready/30'
-              }`}
+                    ? 'bg-amber-500/10 text-amber-500 border border-amber-500/30'
+                    : recordingState === 'initializing' || recordingState === 'stopping'
+                      ? 'bg-clinical-warning/10 text-clinical-warning border border-clinical-warning/30'
+                      : 'bg-clinical-ready/10 text-clinical-ready border border-clinical-ready/30'
+                }`}
             >
               <span
-                className={`w-2 h-2 rounded-full mr-2 ${
-                  recordingState === 'recording'
-                    ? 'bg-clinical-record animate-pulse'
-                    : recordingState === 'paused'
+                className={`w-2 h-2 rounded-full mr-2 ${recordingState === 'recording'
+                  ? 'bg-clinical-record animate-pulse'
+                  : recordingState === 'paused'
                     ? 'bg-clinical-warning'
                     : recordingState === 'warming_up'
-                    ? 'bg-amber-500 animate-ping'
-                    : recordingState === 'initializing' || recordingState === 'stopping'
-                    ? 'bg-clinical-warning animate-pulse'
-                    : 'bg-clinical-ready'
-                }`}
+                      ? 'bg-amber-500 animate-ping'
+                      : recordingState === 'initializing' || recordingState === 'stopping'
+                        ? 'bg-clinical-warning animate-pulse'
+                        : 'bg-clinical-ready'
+                  }`}
               />
               {recordingState === 'recording'
                 ? 'REC'
                 : recordingState === 'paused'
-                ? 'PAUSED'
-                : recordingState === 'warming_up'
-                ? 'WARMING UP'
-                : recordingState === 'initializing'
-                ? 'STARTING'
-                : recordingState === 'stopping'
-                ? 'STOPPING'
-                : 'READY'}
+                  ? 'PAUSED'
+                  : recordingState === 'warming_up'
+                    ? 'WARMING UP'
+                    : recordingState === 'initializing'
+                      ? 'STARTING'
+                      : recordingState === 'stopping'
+                        ? 'STOPPING'
+                        : 'READY'}
             </span>
 
             {/* Warm-up countdown */}
@@ -513,11 +540,7 @@ export default function CameraFeeds() {
         <div className="bg-clinical-card dark:bg-clinical-dark-card border border-clinical-border dark:border-clinical-dark-border rounded overflow-hidden flex flex-col">
           <div className="px-2 py-1 border-b border-clinical-border dark:border-clinical-dark-border flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-1.5">
-              <span className={`w-2 h-2 rounded-full ${
-                camStatus.cam0 === 'connected' ? 'bg-clinical-ready'
-                  : camStatus.cam0 === 'disconnected' ? 'bg-clinical-record'
-                  : 'bg-clinical-warning animate-pulse'
-              }`} />
+              <span className={`w-2 h-2 rounded-full ${camOffline.cam0 ? 'bg-clinical-record' : 'bg-clinical-ready'}`} />
               <span className="text-sm font-medium text-clinical-text-primary dark:text-clinical-text-dark">CAM1 — Front</span>
               {getCameraTypeLabel(0) && (
                 <span className={`text-xs px-1.5 py-0.5 rounded ${getCameraTypeLabel(0) === 'RealSense' ? 'bg-blue-500/20 text-blue-400' : 'bg-gray-500/20 text-gray-400'}`}>
@@ -529,71 +552,27 @@ export default function CameraFeeds() {
           </div>
           <div className="flex-1 bg-neutral-900 flex items-center justify-center overflow-hidden relative min-h-0">
             <img
-              key={`cam0-${cameraKey}`}
-              src={`${API_URL}/camera/0?t=${cameraKey}`}
+              ref={cam0Ref}
               alt=""
-              className={`w-full h-full object-contain ${camStatus.cam0 !== 'connected' ? 'opacity-0' : ''}`}
-              onLoad={() => {
-                camRetryCount.current['cam0'] = 0;
-                setCamStatus(prev => ({ ...prev, cam0: 'connected' }));
-              }}
-              onError={(e) => {
-                const count = (camRetryCount.current['cam0'] || 0) + 1;
-                camRetryCount.current['cam0'] = count;
-                if (count > MAX_CAM_RETRIES) {
-                  setCamStatus(prev => ({ ...prev, cam0: 'disconnected' }));
-                  return;
-                }
-                setCamStatus(prev => ({ ...prev, cam0: count === 1 ? 'connecting' : 'reconnecting' }));
-                const img = e.currentTarget;
-                const delay = Math.min(1000 * Math.pow(2, count - 1), 8000);
-                setTimeout(() => {
-                  if (mountedRef.current) img.src = `${API_URL}/camera/0?t=${Date.now()}`;
-                }, delay);
-              }}
+              className="w-full h-full object-contain"
+              onLoad={() => setCamOffline(prev => ({ ...prev, cam0: false }))}
+              onError={() => setCamOffline(prev => ({ ...prev, cam0: true }))}
             />
-            {camStatus.cam0 !== 'connected' && (
+            {camOffline.cam0 && (
               <div className="absolute inset-0 flex flex-col items-center justify-center text-neutral-400">
-                {camStatus.cam0 === 'disconnected' ? (
-                  <>
-                    <svg className="w-12 h-12 mb-2 text-clinical-record" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                    </svg>
-                    <span className="text-sm font-medium text-clinical-record">Connection Lost: Camera 1</span>
-                    <button
-                      onClick={() => {
-                        camRetryCount.current['cam0'] = 0;
-                        setCamStatus(prev => ({ ...prev, cam0: 'connecting' }));
-                        setCameraKey(Date.now());
-                      }}
-                      className="mt-2 px-3 py-1 bg-clinical-blue text-white text-sm rounded hover:bg-clinical-blue-hover"
-                    >
-                      Retry Connection
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-8 h-8 mb-2 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                    </svg>
-                    <span className="text-sm font-medium">
-                      {camStatus.cam0 === 'reconnecting' ? 'Reconnecting...' : 'Connecting...'}
-                    </span>
-                    <span className="text-xs mt-1 text-neutral-500">
-                      Attempt {camRetryCount.current['cam0'] || 1} / {MAX_CAM_RETRIES}
-                    </span>
-                  </>
-                )}
+                <svg className="w-10 h-10 mb-2 text-neutral-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9A2.25 2.25 0 0013.5 5.25h-9A2.25 2.25 0 002.25 7.5v9A2.25 2.25 0 004.5 18.75z" />
+                </svg>
+                <span className="text-sm font-medium">Camera 1 Offline</span>
+                <span className="text-xs mt-1 text-neutral-500">Click Restart to reconnect</span>
               </div>
             )}
             <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/70 rounded text-sm text-white font-mono">
               CAM1 | FRONT
             </div>
             {(recordingState === 'warming_up' || recordingState === 'recording') && (
-              <div className={`absolute top-2 right-2 flex items-center gap-1.5 px-2 py-1 rounded ${
-                recordingState === 'warming_up' ? 'bg-amber-500' : 'bg-clinical-record'
-              }`}>
+              <div className={`absolute top-2 right-2 flex items-center gap-1.5 px-2 py-1 rounded ${recordingState === 'warming_up' ? 'bg-amber-500' : 'bg-clinical-record'
+                }`}>
                 <span className={`w-1.5 h-1.5 rounded-full bg-white ${recordingState === 'warming_up' ? 'animate-ping' : 'animate-pulse'}`} />
                 <span className="text-sm text-white font-medium">
                   {recordingState === 'warming_up' ? 'WARM UP' : 'REC'}
@@ -607,11 +586,7 @@ export default function CameraFeeds() {
         <div className="bg-clinical-card dark:bg-clinical-dark-card border border-clinical-border dark:border-clinical-dark-border rounded overflow-hidden flex flex-col">
           <div className="px-2 py-1 border-b border-clinical-border dark:border-clinical-dark-border flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-1.5">
-              <span className={`w-2 h-2 rounded-full ${
-                camStatus.cam1 === 'connected' ? 'bg-clinical-ready'
-                  : camStatus.cam1 === 'disconnected' ? 'bg-clinical-record'
-                  : 'bg-clinical-warning animate-pulse'
-              }`} />
+              <span className={`w-2 h-2 rounded-full ${camOffline.cam1 ? 'bg-clinical-record' : 'bg-clinical-ready'}`} />
               <span className="text-sm font-medium text-clinical-text-primary dark:text-clinical-text-dark">CAM2 — Side</span>
               {getCameraTypeLabel(1) && (
                 <span className={`text-xs px-1.5 py-0.5 rounded ${getCameraTypeLabel(1) === 'RealSense' ? 'bg-blue-500/20 text-blue-400' : 'bg-gray-500/20 text-gray-400'}`}>
@@ -623,71 +598,27 @@ export default function CameraFeeds() {
           </div>
           <div className="flex-1 bg-neutral-900 flex items-center justify-center overflow-hidden relative min-h-0">
             <img
-              key={`cam1-${cameraKey}`}
-              src={`${API_URL}/camera/1?t=${cameraKey}`}
+              ref={cam1Ref}
               alt=""
-              className={`w-full h-full object-contain ${camStatus.cam1 !== 'connected' ? 'opacity-0' : ''}`}
-              onLoad={() => {
-                camRetryCount.current['cam1'] = 0;
-                setCamStatus(prev => ({ ...prev, cam1: 'connected' }));
-              }}
-              onError={(e) => {
-                const count = (camRetryCount.current['cam1'] || 0) + 1;
-                camRetryCount.current['cam1'] = count;
-                if (count > MAX_CAM_RETRIES) {
-                  setCamStatus(prev => ({ ...prev, cam1: 'disconnected' }));
-                  return;
-                }
-                setCamStatus(prev => ({ ...prev, cam1: count === 1 ? 'connecting' : 'reconnecting' }));
-                const img = e.currentTarget;
-                const delay = Math.min(1000 * Math.pow(2, count - 1), 8000);
-                setTimeout(() => {
-                  if (mountedRef.current) img.src = `${API_URL}/camera/1?t=${Date.now()}`;
-                }, delay);
-              }}
+              className="w-full h-full object-contain"
+              onLoad={() => setCamOffline(prev => ({ ...prev, cam1: false }))}
+              onError={() => setCamOffline(prev => ({ ...prev, cam1: true }))}
             />
-            {camStatus.cam1 !== 'connected' && (
+            {camOffline.cam1 && (
               <div className="absolute inset-0 flex flex-col items-center justify-center text-neutral-400">
-                {camStatus.cam1 === 'disconnected' ? (
-                  <>
-                    <svg className="w-12 h-12 mb-2 text-clinical-record" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                    </svg>
-                    <span className="text-sm font-medium text-clinical-record">Connection Lost: Camera 2</span>
-                    <button
-                      onClick={() => {
-                        camRetryCount.current['cam1'] = 0;
-                        setCamStatus(prev => ({ ...prev, cam1: 'connecting' }));
-                        setCameraKey(Date.now());
-                      }}
-                      className="mt-2 px-3 py-1 bg-clinical-blue text-white text-sm rounded hover:bg-clinical-blue-hover"
-                    >
-                      Retry Connection
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-8 h-8 mb-2 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                    </svg>
-                    <span className="text-sm font-medium">
-                      {camStatus.cam1 === 'reconnecting' ? 'Reconnecting...' : 'Connecting...'}
-                    </span>
-                    <span className="text-xs mt-1 text-neutral-500">
-                      Attempt {camRetryCount.current['cam1'] || 1} / {MAX_CAM_RETRIES}
-                    </span>
-                  </>
-                )}
+                <svg className="w-10 h-10 mb-2 text-neutral-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9A2.25 2.25 0 0013.5 5.25h-9A2.25 2.25 0 002.25 7.5v9A2.25 2.25 0 004.5 18.75z" />
+                </svg>
+                <span className="text-sm font-medium">Camera 2 Offline</span>
+                <span className="text-xs mt-1 text-neutral-500">Click Restart to reconnect</span>
               </div>
             )}
             <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/70 rounded text-sm text-white font-mono">
               CAM2 | SIDE
             </div>
             {(recordingState === 'warming_up' || recordingState === 'recording') && (
-              <div className={`absolute top-2 right-2 flex items-center gap-1.5 px-2 py-1 rounded ${
-                recordingState === 'warming_up' ? 'bg-amber-500' : 'bg-clinical-record'
-              }`}>
+              <div className={`absolute top-2 right-2 flex items-center gap-1.5 px-2 py-1 rounded ${recordingState === 'warming_up' ? 'bg-amber-500' : 'bg-clinical-record'
+                }`}>
                 <span className={`w-1.5 h-1.5 rounded-full bg-white ${recordingState === 'warming_up' ? 'animate-ping' : 'animate-pulse'}`} />
                 <span className="text-sm text-white font-medium">
                   {recordingState === 'warming_up' ? 'WARM UP' : 'REC'}
@@ -705,11 +636,10 @@ export default function CameraFeeds() {
           <button
             onClick={handleRecord}
             disabled={recordingState !== 'idle'}
-            className={`flex items-center px-5 py-2 rounded text-sm font-semibold transition-colors ${
-              recordingState !== 'idle'
-                ? 'bg-clinical-border dark:bg-clinical-dark-border text-clinical-text-secondary cursor-not-allowed'
-                : 'bg-clinical-record hover:bg-clinical-record-hover text-white'
-            }`}
+            className={`flex items-center px-5 py-2 rounded text-sm font-semibold transition-colors ${recordingState !== 'idle'
+              ? 'bg-clinical-border dark:bg-clinical-dark-border text-clinical-text-secondary cursor-not-allowed'
+              : 'bg-clinical-record hover:bg-clinical-record-hover text-white'
+              }`}
           >
             {recordingState === 'initializing' ? (
               <>
@@ -733,11 +663,10 @@ export default function CameraFeeds() {
           <button
             onClick={recordingState === 'paused' ? handleResume : handlePause}
             disabled={recordingState === 'idle' || recordingState === 'initializing' || recordingState === 'warming_up' || recordingState === 'stopping'}
-            className={`flex items-center px-5 py-2 rounded text-sm font-semibold transition-colors ${
-              recordingState === 'idle' || recordingState === 'initializing' || recordingState === 'warming_up' || recordingState === 'stopping'
-                ? 'bg-clinical-border dark:bg-clinical-dark-border text-clinical-text-secondary cursor-not-allowed'
-                : 'bg-clinical-warning hover:brightness-95 text-white'
-            }`}
+            className={`flex items-center px-5 py-2 rounded text-sm font-semibold transition-colors ${recordingState === 'idle' || recordingState === 'initializing' || recordingState === 'warming_up' || recordingState === 'stopping'
+              ? 'bg-clinical-border dark:bg-clinical-dark-border text-clinical-text-secondary cursor-not-allowed'
+              : 'bg-clinical-warning hover:brightness-95 text-white'
+              }`}
           >
             {recordingState === 'paused' ? (
               <>
@@ -760,11 +689,10 @@ export default function CameraFeeds() {
           <button
             onClick={handleStop}
             disabled={recordingState === 'idle' || recordingState === 'initializing' || recordingState === 'stopping'}
-            className={`flex items-center px-5 py-2 rounded text-sm font-semibold transition-colors ${
-              recordingState === 'idle' || recordingState === 'initializing' || recordingState === 'stopping'
-                ? 'bg-clinical-border dark:bg-clinical-dark-border text-clinical-text-secondary cursor-not-allowed'
-                : 'bg-clinical-neutral hover:bg-clinical-neutral-hover text-white'
-            }`}
+            className={`flex items-center px-5 py-2 rounded text-sm font-semibold transition-colors ${recordingState === 'idle' || recordingState === 'initializing' || recordingState === 'stopping'
+              ? 'bg-clinical-border dark:bg-clinical-dark-border text-clinical-text-secondary cursor-not-allowed'
+              : 'bg-clinical-neutral hover:bg-clinical-neutral-hover text-white'
+              }`}
           >
             {recordingState === 'stopping' ? (
               <>
@@ -783,17 +711,16 @@ export default function CameraFeeds() {
               </>
             )}
           </button>
-          
+
           {/* Swap Cameras button */}
           <button
             onClick={handleSwapCameras}
             disabled={recordingState !== 'idle' || isSwapping}
             title="Swap physical camera assignment for CAM1 (Front) and CAM2 (Side)"
-            className={`flex items-center px-4 py-2 rounded text-sm font-semibold transition-colors border ${
-              isSwapped
-                ? 'bg-clinical-warning/10 border-clinical-warning/40 text-clinical-warning hover:bg-clinical-warning/20'
-                : 'bg-clinical-bg dark:bg-clinical-dark-bg border-clinical-border dark:border-clinical-dark-border text-clinical-text-secondary dark:text-clinical-text-dark-secondary hover:bg-clinical-border dark:hover:bg-clinical-dark-border'
-            } disabled:opacity-50 disabled:cursor-not-allowed`}
+            className={`flex items-center px-4 py-2 rounded text-sm font-semibold transition-colors border ${isSwapped
+              ? 'bg-clinical-warning/10 border-clinical-warning/40 text-clinical-warning hover:bg-clinical-warning/20'
+              : 'bg-clinical-bg dark:bg-clinical-dark-bg border-clinical-border dark:border-clinical-dark-border text-clinical-text-secondary dark:text-clinical-text-dark-secondary hover:bg-clinical-border dark:hover:bg-clinical-dark-border'
+              } disabled:opacity-50 disabled:cursor-not-allowed`}
           >
             <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" />
@@ -801,11 +728,11 @@ export default function CameraFeeds() {
             {isSwapped ? 'Cameras Swapped' : 'Swap Cameras'}
           </button>
 
-          {/* Refresh Cameras button — independent of actionInFlight */}
+          {/* Refresh Cameras button — just re-reads info */}
           <button
             onClick={handleRefresh}
-            disabled={isRefreshing || recordingState !== 'idle'}
-            title="Re-detect cameras (use after plugging/unplugging)"
+            disabled={isRefreshing}
+            title="Re-read camera info (non-destructive)"
             className="flex items-center px-4 py-2 rounded text-sm font-semibold transition-colors border bg-clinical-bg dark:bg-clinical-dark-bg border-clinical-border dark:border-clinical-dark-border text-clinical-text-secondary dark:text-clinical-text-dark-secondary hover:bg-clinical-border dark:hover:bg-clinical-dark-border disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isRefreshing ? (
@@ -822,6 +749,31 @@ export default function CameraFeeds() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
                 Refresh
+              </>
+            )}
+          </button>
+
+          {/* Restart Cameras button — hard pipeline restart */}
+          <button
+            onClick={handleRestart}
+            disabled={isRestarting || recordingState !== 'idle'}
+            title="Hard restart: stop cameras, re-detect, restart pipelines"
+            className="flex items-center px-4 py-2 rounded text-sm font-semibold transition-colors border bg-clinical-record/10 border-clinical-record/30 text-clinical-record hover:bg-clinical-record/20 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isRestarting ? (
+              <>
+                <svg className="w-4 h-4 mr-1.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+                Restarting…
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 5.636a9 9 0 1012.728 0M12 3v9" />
+                </svg>
+                Restart
               </>
             )}
           </button>

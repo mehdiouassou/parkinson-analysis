@@ -47,6 +47,9 @@ interface CameraQuality {
   mp4_frames_from_sidecar: number | null;
   bag_frames?: number | null;
   bag_frames_source?: string;
+  bag_expected_frames?: number | null;
+  bag_dropped_frames?: number | null;
+  real_fps?: number | null;
   frame_difference: number | null;
   drop_rate_percent: number | null;
   fps: number;
@@ -56,6 +59,10 @@ interface CameraQuality {
   recording_stopped_at?: string | null;
   inter_camera_offset_ms?: number;
   pipeline_restart_ms?: number;
+  first_hw_timestamp?: number | null;
+  last_hw_timestamp?: number | null;
+  hw_timestamp_domain?: string | null;
+  frames_at_stop?: number | null;
 }
 
 interface QualitySync {
@@ -416,15 +423,15 @@ export default function FileManager() {
     setViewingFile(filename);
     setViewType(type);
     setViewContent(null);
-    
+
     try {
       const url = `${API_URL}/files/download/${type}/${encodeURIComponent(filename)}`;
       const res = await fetch(url);
-      
+
       if (!res.ok) {
         throw new Error('Failed to load file');
       }
-      
+
       const text = await res.text();
       setViewContent(text);
     } catch (error) {
@@ -432,7 +439,7 @@ export default function FileManager() {
       showToast(`Failed to load ${filename}`, 'error');
       closeViewer();
     }
-    
+
     setViewLoading(false);
   };
 
@@ -468,10 +475,10 @@ export default function FileManager() {
   const parseCSV = (text: string): { headers: string[]; rows: string[][] } => {
     const lines = text.trim().split('\n');
     if (lines.length === 0) return { headers: [], rows: [] };
-    
+
     const headers = lines[0].split(',').map(h => h.trim());
     const rows = lines.slice(1).map(line => line.split(',').map(cell => cell.trim()));
-    
+
     return { headers, rows };
   };
 
@@ -479,20 +486,20 @@ export default function FileManager() {
   const highlightJSON = (json: string): React.ReactNode[] => {
     const elements: React.ReactNode[] = [];
     let key = 0;
-    
+
     // Match different JSON tokens
     const regex = /("[^"]*")\s*:|"[^"]*"|\b(true|false|null)\b|-?\d+\.?\d*([eE][+-]?\d+)?|[{}\[\],:]|\s+/g;
     let match;
     let lastIndex = 0;
-    
+
     while ((match = regex.exec(json)) !== null) {
       // Add any unmatched text
       if (match.index > lastIndex) {
         elements.push(<span key={key++}>{json.slice(lastIndex, match.index)}</span>);
       }
-      
+
       const token = match[0];
-      
+
       if (match[1]) {
         // Key (property name with colon)
         elements.push(
@@ -523,34 +530,40 @@ export default function FileManager() {
         // Punctuation, whitespace
         elements.push(<span key={key++}>{token}</span>);
       }
-      
+
       lastIndex = regex.lastIndex;
     }
-    
+
     // Add remaining text
     if (lastIndex < json.length) {
       elements.push(<span key={key++}>{json.slice(lastIndex)}</span>);
     }
-    
+
     return elements;
   };
 
   const tabs = [
-    { id: 'videos' as const, label: 'Videos', count: files.videos.length, icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-      </svg>
-    )},
-    { id: 'csvs' as const, label: 'CSV Files', count: files.csvs.length, icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-      </svg>
-    )},
-    { id: 'jsons' as const, label: 'JSON Files', count: files.jsons.length, icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-      </svg>
-    )},
+    {
+      id: 'videos' as const, label: 'Videos', count: files.videos.length, icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+        </svg>
+      )
+    },
+    {
+      id: 'csvs' as const, label: 'CSV Files', count: files.csvs.length, icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+      )
+    },
+    {
+      id: 'jsons' as const, label: 'JSON Files', count: files.jsons.length, icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+        </svg>
+      )
+    },
   ];
 
   return (
@@ -577,19 +590,17 @@ export default function FileManager() {
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold transition-colors ${
-              activeTab === tab.id
-                ? 'text-clinical-blue border-b-2 border-clinical-blue'
-                : 'text-clinical-text-secondary dark:text-clinical-text-dark-secondary hover:text-clinical-text-primary dark:hover:text-clinical-text-dark'
-            }`}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold transition-colors ${activeTab === tab.id
+              ? 'text-clinical-blue border-b-2 border-clinical-blue'
+              : 'text-clinical-text-secondary dark:text-clinical-text-dark-secondary hover:text-clinical-text-primary dark:hover:text-clinical-text-dark'
+              }`}
           >
             {tab.icon}
             {tab.label}
-            <span className={`ml-1 px-2.5 py-1 text-sm font-medium rounded ${
-              activeTab === tab.id 
-                ? 'bg-clinical-blue/10 text-clinical-blue' 
-                : 'bg-clinical-bg dark:bg-clinical-dark-bg text-clinical-text-secondary dark:text-clinical-text-dark-secondary'
-            }`}>
+            <span className={`ml-1 px-2.5 py-1 text-sm font-medium rounded ${activeTab === tab.id
+              ? 'bg-clinical-blue/10 text-clinical-blue'
+              : 'bg-clinical-bg dark:bg-clinical-dark-bg text-clinical-text-secondary dark:text-clinical-text-dark-secondary'
+              }`}>
               {tab.count}
             </span>
           </button>
@@ -1163,8 +1174,8 @@ export default function FileManager() {
                       <span>
                         {qualityElapsed < 10 ? 'Opening pipeline…'
                           : qualityElapsed < 40 ? 'Counting frames…'
-                          : qualityElapsed < 70 ? 'Almost there…'
-                          : 'Finalising…'}
+                            : qualityElapsed < 70 ? 'Almost there…'
+                              : 'Finalising…'}
                       </span>
                     </div>
                   </div>
@@ -1241,9 +1252,8 @@ export default function FileManager() {
                             {/* Recording start offset — ground truth from pipeline timestamps */}
                             <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-clinical-bg dark:bg-clinical-dark-bg">
                               <span className="text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary">Start offset</span>
-                              <span className={`font-mono font-semibold text-sm ${
-                                startOffMs <= 100 ? 'text-green-500' : startOffMs <= 500 ? 'text-amber-500' : 'text-red-500'
-                              }`}>{startOffMs.toFixed(0)}ms</span>
+                              <span className={`font-mono font-semibold text-sm ${startOffMs <= 100 ? 'text-green-500' : startOffMs <= 500 ? 'text-amber-500' : 'text-red-500'
+                                }`}>{startOffMs.toFixed(0)}ms</span>
                             </div>
                             <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-clinical-bg dark:bg-clinical-dark-bg">
                               <span className="text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary">MP4 Frame Δ</span>
@@ -1263,12 +1273,11 @@ export default function FileManager() {
                         )}
                         {/* Sync quality badge */}
                         {syncQuality && (
-                          <div className={`px-3 py-1.5 rounded-lg text-xs font-bold text-center uppercase tracking-wider ${
-                            syncQuality === 'excellent' ? 'bg-green-500/10 text-green-500'
-                              : syncQuality === 'good' ? 'bg-green-500/10 text-green-400'
+                          <div className={`px-3 py-1.5 rounded-lg text-xs font-bold text-center uppercase tracking-wider ${syncQuality === 'excellent' ? 'bg-green-500/10 text-green-500'
+                            : syncQuality === 'good' ? 'bg-green-500/10 text-green-400'
                               : syncQuality === 'fair' ? 'bg-amber-500/10 text-amber-500'
-                              : 'bg-red-500/10 text-red-500'
-                          }`}>
+                                : 'bg-red-500/10 text-red-500'
+                            }`}>
                             {syncQuality} sync
                           </div>
                         )}
@@ -1308,25 +1317,41 @@ export default function FileManager() {
                                 }
                               </span>
                             </div>
-                            {cam.mp4_frames_from_sidecar != null && (
+                            {cam.frames_at_stop != null && (
                               <div className="flex justify-between text-xs">
                                 <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">Frames at stop</span>
-                                <span className={`font-mono ${cam.mp4_frames_from_sidecar === cam.mp4_frames ? 'text-green-500' : 'text-amber-500'}`}>
-                                  {cam.mp4_frames_from_sidecar.toLocaleString()}
+                                <span className={`font-mono ${cam.frames_at_stop === cam.bag_frames ? 'text-green-500' : 'text-amber-500'}`}>
+                                  {cam.frames_at_stop.toLocaleString()}
+                                </span>
+                              </div>
+                            )}
+                            {cam.bag_expected_frames != null && (
+                              <div className="flex justify-between text-xs">
+                                <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">Expected frames</span>
+                                <span className="font-mono text-clinical-text-primary dark:text-clinical-text-dark">{cam.bag_expected_frames.toLocaleString()}</span>
+                              </div>
+                            )}
+                            {cam.bag_dropped_frames != null && (
+                              <div className="flex justify-between text-xs">
+                                <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary" title="Hardware drops during recording">HW Frame drops</span>
+                                <span className={`font-mono font-semibold ${cam.bag_dropped_frames > 0 ? 'text-red-500' : 'text-green-500'}`}>
+                                  {cam.bag_dropped_frames.toLocaleString()}
                                 </span>
                               </div>
                             )}
                             <div className="flex justify-between text-xs">
-                              <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">Frame drops</span>
+                              <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary" title="Codec drops during MP4 conversion">Codec Frame drops</span>
                               <span className={`font-mono font-semibold ${dropColor}`}>{cam.frame_difference ?? '—'}</span>
                             </div>
                             <div className="flex justify-between text-xs">
-                              <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">Drop rate</span>
+                              <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">Codec Drop rate</span>
                               <span className={`font-mono font-semibold ${dropColor}`}>{cam.drop_rate_percent != null ? `${cam.drop_rate_percent}%` : '—'}</span>
                             </div>
                             <div className="flex justify-between text-xs">
-                              <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">FPS</span>
-                              <span className="font-mono text-clinical-text-secondary dark:text-clinical-text-dark-secondary">{cam.fps}</span>
+                              <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary">FPS (Target / Real)</span>
+                              <span className="font-mono text-clinical-text-secondary dark:text-clinical-text-dark-secondary">
+                                {cam.fps} / {cam.real_fps != null ? cam.real_fps.toFixed(2) : '—'}
+                              </span>
                             </div>
                             {cam.bag_size_mb != null && (
                               <div className="flex justify-between text-xs">
@@ -1377,22 +1402,21 @@ export default function FileManager() {
 
       {/* File Viewer Modal */}
       {viewingFile && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
           onClick={closeViewer}
         >
-          <div 
+          <div
             className="bg-clinical-card dark:bg-clinical-dark-card rounded-lg shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-clinical-border dark:border-clinical-dark-border flex-shrink-0">
               <div className="flex items-center gap-3">
-                <span className={`px-2 py-1 text-xs font-semibold rounded ${
-                  viewType === 'json' 
-                    ? 'bg-clinical-warning/10 text-clinical-warning' 
-                    : 'bg-clinical-ready/10 text-clinical-ready'
-                }`}>
+                <span className={`px-2 py-1 text-xs font-semibold rounded ${viewType === 'json'
+                  ? 'bg-clinical-warning/10 text-clinical-warning'
+                  : 'bg-clinical-ready/10 text-clinical-ready'
+                  }`}>
                   {viewType?.toUpperCase()}
                 </span>
                 <h2 className="text-lg font-semibold text-clinical-text-primary dark:text-clinical-text-dark">
@@ -1417,7 +1441,7 @@ export default function FileManager() {
                 </button>
               </div>
             </div>
-            
+
             {/* Modal Content */}
             <div className="flex-1 overflow-auto p-6 min-h-0">
               {viewLoading ? (

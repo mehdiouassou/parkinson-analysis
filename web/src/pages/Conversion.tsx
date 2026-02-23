@@ -424,19 +424,18 @@ export default function Conversion() {
         <div className="space-y-6">
           {[
             { label: 'Camera 1 — Front', slot: currentJob?.camera1 },
-            { label: 'Camera 2 — Side',  slot: currentJob?.camera2 },
+            { label: 'Camera 2 — Side', slot: currentJob?.camera2 },
           ].map(({ label, slot }) => (
             <div key={label}>
               <div className="flex justify-between items-center mb-2 gap-3 flex-wrap">
                 <div className="flex items-center gap-2">
                   <span className="text-base font-medium text-clinical-text-primary dark:text-clinical-text-dark">{label}</span>
                   {slot?.encoder && (
-                    <span className={`px-1.5 py-0.5 text-xs font-medium rounded ${
-                      slot.encoder === 'h264_nvenc'
+                    <span className={`px-1.5 py-0.5 text-xs font-medium rounded ${!slot.encoder.startsWith('libx')
                         ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
                         : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300'
-                    }`}>
-                      {slot.encoder === 'h264_nvenc' ? 'NVENC' : 'x264'}
+                      }`}>
+                      {!slot.encoder.startsWith('libx') ? 'HW Accel' : 'CPU'}
                     </span>
                   )}
                 </div>

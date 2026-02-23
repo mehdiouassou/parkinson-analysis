@@ -10,6 +10,7 @@ venv/
 # Models
 models/*.engine
 models/*.pt
+models/*.onnx
 models/unused/
 
 # System
@@ -22,8 +23,11 @@ Thumbs.db
 # Build
 web/dist/
 
+# npm
+npm-cache/
+
 # Jetson Artifacts
-jetson_agx_orin_py312_env.tar.gz
+jetson_orin_py38_env.tar.gz
 
 # Ignore data directories content
 api/recordings/*

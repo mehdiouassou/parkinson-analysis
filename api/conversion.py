@@ -122,7 +122,11 @@ def is_batch_converting(batch_id: str) -> Tuple[bool, Optional[str]]:
 # =============================================================================
 
 def _get_ffmpeg_path() -> Optional[str]:
-    """Return path to FFmpeg binary or None if not available."""
+    """Return path to FFmpeg binary prioritizing the system ffmpeg."""
+    import shutil
+    sys_ffmpeg = shutil.which("ffmpeg")
+    if sys_ffmpeg:
+        return sys_ffmpeg
     if not FFMPEG_AVAILABLE or imageio_ffmpeg is None:
         return None
     try:
@@ -131,16 +135,18 @@ def _get_ffmpeg_path() -> Optional[str]:
         return None
 
 
-def _count_bag_frames(bag_path: Path) -> int:
+def _count_bag_frames(bag_path: Path) -> dict:
     """
     Count color frames in a BAG by replaying at non-realtime speed.
-    Fast pass — does not decode pixel data; just counts framesets.
-    Returns 0 on error.
+    Also extracts first and last frame timestamps to calculate exact duration.
+    Returns a dict with total_frames, first_ts, and last_ts.
     """
     if not REALSENSE_AVAILABLE or rs is None:
-        return 0
+        return {"total_frames": 0, "first_ts": None, "last_ts": None}
 
     frame_count = 0
+    first_ts = None
+    last_ts = None
     pipeline = rs.pipeline()
     try:
         config = rs.config()
@@ -153,7 +159,12 @@ def _count_bag_frames(bag_path: Path) -> int:
         while True:
             try:
                 frames = pipeline.wait_for_frames(timeout_ms=2000)
-                if frames.get_color_frame():
+                color_frame = frames.get_color_frame()
+                if color_frame:
+                    ts = color_frame.get_timestamp()
+                    if first_ts is None:
+                        first_ts = ts
+                    last_ts = ts
                     frame_count += 1
             except RuntimeError:
                 break  # End of file
@@ -165,7 +176,7 @@ def _count_bag_frames(bag_path: Path) -> int:
         except Exception:
             pass
 
-    return frame_count
+    return {"total_frames": frame_count, "first_ts": first_ts, "last_ts": last_ts}
 
 
 def _update_metadata_sidecar(
@@ -181,6 +192,7 @@ def _update_metadata_sidecar(
     camera_mode: str = "",
     recorded_at: str = "",
     bag_file: str = "",
+    extra_data: dict = None,
 ):
     """
     Update (or create) the metadata sidecar JSON after successful conversion.
@@ -208,6 +220,9 @@ def _update_metadata_sidecar(
     meta.setdefault("camera_mode", camera_mode)
     meta.setdefault("recorded_at", recorded_at)
     meta.setdefault("bag_file", bag_file or meta_path.stem.replace("_metadata", "") + ".bag")
+
+    if extra_data:
+        meta.update(extra_data)
 
     meta_path.write_text(json.dumps(meta, indent=2))
     print(f"[Conversion] Metadata updated: {meta_path.name}")
@@ -296,8 +311,26 @@ def _convert_single_camera(job_id: str, cam_num: int, batch_id: str):
 
     print(f"[Conversion] {cam_key}: Counting BAG frames...")
     _update({"status": "converting", "progress": 0})
-    total_frames = _count_bag_frames(bag_path)
-    print(f"[Conversion] {cam_key}: {total_frames} frames in BAG")
+    bag_stats = _count_bag_frames(bag_path)
+    total_frames = bag_stats["total_frames"]
+    first_ts = bag_stats["first_ts"]
+    last_ts = bag_stats["last_ts"]
+
+    real_fps = fps
+    expected_frames = total_frames
+    dropped_frames = 0
+
+    if first_ts is not None and last_ts is not None and total_frames > 1:
+        duration_sec = (last_ts - first_ts) / 1000.0
+        if duration_sec > 0:
+            real_fps = total_frames / duration_sec
+            expected_frames = int(round(duration_sec * fps))
+            dropped_frames = max(0, expected_frames - total_frames)
+            print(f"[Conversion] {cam_key}: {total_frames} frames in {duration_sec:.2f}s "
+                  f"({real_fps:.2f} FPS). Expected: {expected_frames}, Dropped: {dropped_frames}")
+    else:
+        print(f"[Conversion] {cam_key}: {total_frames} frames in BAG")
+
     _update({"total_frames": total_frames})
 
     if _is_cancelled():
@@ -308,12 +341,12 @@ def _convert_single_camera(job_id: str, cam_num: int, batch_id: str):
 
     encoder_configs = [
         (
-            "h264_nvenc",
-            ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23", "-pix_fmt", "yuv420p"],
+            "nvv4l2h264enc",  # Jetson GStreamer hardware acceleration (H.264)
+            [],
         ),
         (
-            "libx264",
-            ["-c:v", "libx264", "-preset", "fast", "-crf", "23", "-pix_fmt", "yuv420p"],
+            "libx264",        # FFmpeg software fallback (H.264)
+            ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-pix_fmt", "yuv420p"],
         ),
     ]
 
@@ -352,20 +385,38 @@ def _convert_single_camera(job_id: str, cam_num: int, batch_id: str):
             actual_h = stream_profile.height()
             print(f"[Conversion] {cam_key}: BAG stream {actual_w}x{actual_h} @ {actual_fps}fps")
 
-            ffmpeg_cmd = [
-                ffmpeg_path, "-y",
-                "-f", "rawvideo", "-vcodec", "rawvideo",
-                "-s", f"{actual_w}x{actual_h}",
-                "-pix_fmt", "bgr24",
-                "-r", str(int(actual_fps)),
-                "-i", "pipe:0",
-                *encode_args,
-                "-movflags", "+faststart",
-                "-f", "mp4",
-                str(temp_path),
-            ]
+            if encoder_name == "nvv4l2h264enc":
+                import shutil
+                if not shutil.which("gst-launch-1.0"):
+                    raise Exception("gst-launch-1.0 not found in PATH")
+                
+                cmd = [
+                    "gst-launch-1.0", "-q",
+                    "fdsrc", "fd=0",
+                    "!", "videoparse", "format=bgr", f"width={actual_w}", f"height={actual_h}", f"framerate={int(actual_fps)}/1",
+                    "!", "videoconvert", "!", "video/x-raw,format=I420",
+                    "!", "nvvidconv", "!", "video/x-raw(memory:NVMM)",
+                    "!", "nvv4l2h264enc", "maxperf-enable=1", "bitrate=4000000",
+                    "!", "h264parse",
+                    "!", "mp4mux", "faststart=true",
+                    "!", "filesink", f"location={temp_path}"
+                ]
+            else:
+                cmd = [
+                    ffmpeg_path, "-y",
+                    "-f", "rawvideo", "-vcodec", "rawvideo",
+                    "-s", f"{actual_w}x{actual_h}",
+                    "-pix_fmt", "bgr24",
+                    "-r", str(int(actual_fps)),
+                    "-i", "pipe:0",
+                    *encode_args,
+                    "-movflags", "+faststart",
+                    "-f", "mp4",
+                    str(temp_path),
+                ]
+
             ffmpeg_proc = subprocess.Popen(
-                ffmpeg_cmd,
+                cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
@@ -404,11 +455,13 @@ def _convert_single_camera(job_id: str, cam_num: int, batch_id: str):
             except Exception:
                 pass
             if ffmpeg_proc is not None:
+                ffmpeg_stderr = b""
                 try:
-                    ffmpeg_proc.stdin.close()
-                except Exception:
-                    pass
-                _, ffmpeg_stderr = ffmpeg_proc.communicate()
+                    # Let communicate handle stdin.close() natively to avoid "flush of closed file"
+                    _, ffmpeg_stderr = ffmpeg_proc.communicate(timeout=10)
+                except Exception as e:
+                    print(f"[Conversion] {cam_key}: Error communicating with FFmpeg: {e}")
+                    
                 if not bag_read_ok and ffmpeg_stderr:
                     print(
                         f"[Conversion] {cam_key}: FFmpeg stderr ({encoder_name}): "
@@ -480,13 +533,18 @@ def _convert_single_camera(job_id: str, cam_num: int, batch_id: str):
             camera_view=camera_view, camera_type=camera_type,
             fps=actual_fps, camera_mode=camera_mode, recorded_at=recorded_at,
             bag_file=bag_path.name,
+            extra_data={
+                "real_fps": real_fps,
+                "expected_frames": expected_frames,
+                "dropped_frames": dropped_frames
+            }
         )
         return  # Done
 
     # All encoders failed
     print(f"[Conversion] {cam_key}: All encoders failed")
     _cleanup_temp()
-    _update({"status": "failed", "error": "All encoders failed (h264_nvenc, libx264)"})
+    _update({"status": "failed", "error": "All encoders failed (nvv4l2h264enc, libx264)"})
 
 
 # =============================================================================
