@@ -497,7 +497,8 @@ export default function Tagging() {
         {duration > 0 && actionLogs.map(log => {
           const pct = Math.min(99.5, (log.frame / videoFps / duration) * 100);
           // blue for left/right (sagittale), green for far/near (frontale)
-          const color = log.direction < 2 ? '#005EB8' : '#039855';
+          // High contrast colors: Neon Orange for left/right, Neon Green for far/near
+          const color = log.direction < 2 ? '#FF5F1F' : '#39FF14';
           return (
             <div
               key={log.id}

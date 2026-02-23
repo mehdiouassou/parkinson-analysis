@@ -37,6 +37,7 @@ import threading
 import time
 import json
 import subprocess
+import os
 from datetime import datetime
 from typing import Dict
 
@@ -63,6 +64,7 @@ from models import (
     SaveTaggingRequest,
     ProcessRequest,
     RecordingStartRequest,
+    RecordingStopRequest,
     ConversionStartRequest,
 )
 from camera import (
@@ -515,7 +517,6 @@ def start_recording(data: RecordingStartRequest = None):
     timestamp_str = timestamp.strftime("%Y-%m-%d_%H-%M-%S")
 
     with recording_lock:
-        recording_state["patient_name"] = data.patientName if data else ""
         recording_state["patient_id"] = data.patientId if data else ""
         recording_state["timestamp_str"] = timestamp_str
         recording_state["warmup_start"] = timestamp
@@ -584,7 +585,7 @@ def resume_recording():
 
 
 @app.post("/recording/stop")
-def stop_recording():
+def stop_recording(data: RecordingStopRequest = None):
     """
     Stop recording and save BAG files with metadata sidecars.
 
@@ -595,7 +596,6 @@ def stop_recording():
     MP4 files are NOT created here — use the Conversion page post-recording.
     """
     bag_files = []
-    patient_name = ""
     patient_id = ""
     camera_types = {}
     fps_per_cam = {}
@@ -610,7 +610,6 @@ def stop_recording():
             recording_state["timestamp_str"] = None
             recording_state["camera_types"] = {}
             recording_state["fps_per_cam"] = {}
-            recording_state["patient_name"] = ""
             recording_state["patient_id"] = ""
             recording_state["recording_start_times"] = {}
             recording_state["inter_camera_offset_ms"] = 0.0
@@ -624,7 +623,6 @@ def stop_recording():
             }
 
         # Atomically read all state and clear in one lock acquisition
-        patient_name = recording_state.get("patient_name", "")
         patient_id = recording_state.get("patient_id", "")
         camera_types = recording_state.get("camera_types", {}).copy()
         fps_per_cam = recording_state.get("fps_per_cam", {}).copy()
@@ -643,7 +641,6 @@ def stop_recording():
         recording_state["filenames_bag"] = {}
         recording_state["camera_types"] = {}
         recording_state["fps_per_cam"] = {}
-        recording_state["patient_name"] = ""
         recording_state["patient_id"] = ""
         recording_state["recording_start_times"] = {}
         recording_state["inter_camera_offset_ms"] = 0.0
@@ -685,6 +682,45 @@ def stop_recording():
     for t in stop_threads:
         t.join()
 
+    # ----- Rename BAG files with Note and CF/CS -----
+    note = data.note.strip() if data and data.note else ""
+    # Sanitize note
+    import re
+    safe_note = re.sub(r'[^\w\-_]', '', note)
+    
+    renamed_bag_files = []
+    
+    for bag_file in bag_files:
+        old_path = RECORDINGS_DIR / bag_file
+        
+        # Parse timestamp and camera
+        # Expected format: YYYY-MM-DD_HH-MM-SS_cameraX.bag
+        parts = bag_file.split('_camera')
+        if len(parts) == 2:
+            timestamp_part = parts[0]
+            cam_suffix = parts[1] # "1.bag" or "2.bag"
+            
+            cam_label = "CF" if cam_suffix.startswith("1") else "CS"
+            
+            if safe_note:
+                new_filename = f"{timestamp_part}_{cam_label}_{safe_note}.bag"
+            else:
+                new_filename = f"{timestamp_part}_{cam_label}.bag"
+                
+            new_path = RECORDINGS_DIR / new_filename
+            
+            try:
+                os.rename(old_path, new_path)
+                print(f"[Recording] Renamed {bag_file} -> {new_filename}")
+                renamed_bag_files.append(new_filename)
+            except OSError as e:
+                print(f"[Recording] Rename failed for {bag_file}: {e}")
+                renamed_bag_files.append(bag_file) # Keep old name if fail
+        else:
+            renamed_bag_files.append(bag_file)
+
+    bag_files = renamed_bag_files
+
     # Save metadata sidecar for each BAG file — includes sync tracking data
     # and hardware timestamps for post-hoc alignment
     for bag_file in bag_files:
@@ -692,10 +728,18 @@ def stop_recording():
         metadata_file = f"{base_name}_metadata.json"
         metadata_path = RECORDINGS_DIR / metadata_file
 
-        cam_id = 0 if '_camera1' in base_name else 1 if '_camera2' in base_name else -1
-        cam_type = camera_types.get(cam_id, CAMERA_TYPE_REALSENSE)
-        camera_view = "Front" if cam_id == 0 else "Side"
+        if '_CF' in base_name or '_camera1' in base_name:
+            cam_id = 0
+            camera_view = "Front"
+        elif '_CS' in base_name or '_camera2' in base_name:
+            cam_id = 1
+            camera_view = "Side"
+        else:
+            cam_id = -1
+            camera_view = "Unknown"
 
+        cam_type = camera_types.get(cam_id, CAMERA_TYPE_REALSENSE)
+        
         # Read hardware timestamps from camera for post-hoc sync alignment
         physical_cam = get_camera_source(get_physical_camera_id(cam_id))
         first_hw_ts = physical_cam.get_first_hw_timestamp()
@@ -704,8 +748,8 @@ def stop_recording():
         frames_at_stop = physical_cam.get_recording_frame_count()
 
         metadata_content = {
-            "patient_name": patient_name,
             "patient_id": patient_id,
+            "note": note,
             "bag_file": bag_file,
             "camera_type": cam_type,
             "camera_view": camera_view,
@@ -727,6 +771,10 @@ def stop_recording():
             "mp4_frames": None,
             "mp4_source": None,
             "converted_at": None,
+            # Timing fields
+            "conversion_duration_s": None,
+            "processing_duration_s": None,
+            "total_duration_s": None,
         }
         metadata_path.write_text(json.dumps(metadata_content, indent=2))
         print(f"[Recording] Metadata saved: {metadata_file}")
@@ -923,9 +971,9 @@ def list_recordings():
             except Exception:
                 pass
 
-        if "_camera1" in f.stem:
+        if "_camera1" in f.stem or "_CF" in f.stem:
             cam_type = "Front"
-        elif "_camera2" in f.stem:
+        elif "_camera2" in f.stem or "_CS" in f.stem:
             cam_type = "Side"
         else:
             cam_type = ""
@@ -960,11 +1008,31 @@ def list_batches():
 
     for f in bag_files:
         name = f.stem
-        parts = name.rsplit('_camera', 1)
-        if len(parts) == 2:
-            batch_id = parts[0]
-            camera_num = parts[1]
-
+        # Try both formats:
+        # Old: YYYY-MM-DD_HH-MM-SS_camera1.bag
+        # New: YYYY-MM-DD_HH-MM-SS_CF_note.bag
+        
+        parts_old = name.rsplit('_camera', 1)
+        
+        batch_id = ""
+        camera_num = ""
+        
+        if len(parts_old) == 2:
+             batch_id = parts_old[0]
+             camera_num = parts_old[1] # "1" or "2"
+        else:
+             # Try new format
+             # Split by _CF or _CS
+             if "_CF" in name:
+                 parts_new = name.split('_CF')
+                 batch_id = parts_new[0]
+                 camera_num = "1"
+             elif "_CS" in name:
+                 parts_new = name.split('_CS')
+                 batch_id = parts_new[0]
+                 camera_num = "2"
+        
+        if batch_id and camera_num:
             if batch_id not in batches:
                 batches[batch_id] = {
                     "batch_id": batch_id,
@@ -1010,9 +1078,29 @@ def list_batches():
 
     # Enrich with patient metadata from sidecar JSON
     for batch_id, batch in batches.items():
-        meta_path = RECORDINGS_DIR / f"{batch_id}_camera1_metadata.json"
-        if not meta_path.exists():
-            meta_path = RECORDINGS_DIR / f"{batch_id}_camera2_metadata.json"
+        meta_path = None
+        
+        # Try to find metadata from actual bag filenames
+        if batch.get("camera1_hq"):
+             bag_name = batch["camera1_hq"]
+             # Strip extension
+             base_name = os.path.splitext(bag_name)[0]
+             possible_meta = RECORDINGS_DIR / f"{base_name}_metadata.json"
+             if possible_meta.exists():
+                 meta_path = possible_meta
+        
+        if not meta_path and batch.get("camera2_hq"):
+             bag_name = batch["camera2_hq"]
+             base_name = os.path.splitext(bag_name)[0]
+             possible_meta = RECORDINGS_DIR / f"{base_name}_metadata.json"
+             if possible_meta.exists():
+                 meta_path = possible_meta
+        
+        # Fallback to legacy naming if somehow not found
+        if not meta_path:
+            meta_path = RECORDINGS_DIR / f"{batch_id}_camera1_metadata.json"
+            if not meta_path.exists():
+                meta_path = RECORDINGS_DIR / f"{batch_id}_camera2_metadata.json"
 
         batch["patient_name"] = ""
         batch["patient_id"] = ""
@@ -1588,11 +1676,30 @@ def list_all_files():
     # Process BAG files (RealSense recordings)
     for f in RECORDINGS_DIR.glob("*.bag"):
         name = f.stem
-        parts = name.rsplit('_camera', 1)
-        if len(parts) == 2:
-            batch_id = parts[0]
-            camera_num = parts[1]
-
+        # Try both formats:
+        # Old: YYYY-MM-DD_HH-MM-SS_camera1.bag
+        # New: YYYY-MM-DD_HH-MM-SS_CF_note.bag
+        
+        parts_old = name.rsplit('_camera', 1)
+        
+        batch_id = ""
+        camera_num = ""
+        
+        if len(parts_old) == 2:
+             batch_id = parts_old[0]
+             camera_num = parts_old[1] # "1" or "2"
+        else:
+             # Try new format
+             if "_CF" in name:
+                 parts_new = name.split('_CF')
+                 batch_id = parts_new[0]
+                 camera_num = "1"
+             elif "_CS" in name:
+                 parts_new = name.split('_CS')
+                 batch_id = parts_new[0]
+                 camera_num = "2"
+        
+        if batch_id and camera_num:
             if batch_id not in batches:
                 batches[batch_id] = {
                     "batch_id": batch_id,
@@ -1647,9 +1754,28 @@ def list_all_files():
 
     # Enrich each batch with patient metadata from sidecar JSON
     for batch_id, batch in batches.items():
-        meta_path = RECORDINGS_DIR / f"{batch_id}_camera1_metadata.json"
-        if not meta_path.exists():
-            meta_path = RECORDINGS_DIR / f"{batch_id}_camera2_metadata.json"
+        meta_path = None
+        
+        # Try to find metadata from actual bag filenames
+        if batch.get("camera1_bag_name"):
+             bag_name = batch["camera1_bag_name"]
+             base_name = os.path.splitext(bag_name)[0]
+             possible_meta = RECORDINGS_DIR / f"{base_name}_metadata.json"
+             if possible_meta.exists():
+                 meta_path = possible_meta
+        
+        if not meta_path and batch.get("camera2_bag_name"):
+             bag_name = batch["camera2_bag_name"]
+             base_name = os.path.splitext(bag_name)[0]
+             possible_meta = RECORDINGS_DIR / f"{base_name}_metadata.json"
+             if possible_meta.exists():
+                 meta_path = possible_meta
+
+        # Fallback to legacy naming
+        if not meta_path:
+             meta_path = RECORDINGS_DIR / f"{batch_id}_camera1_metadata.json"
+             if not meta_path.exists():
+                 meta_path = RECORDINGS_DIR / f"{batch_id}_camera2_metadata.json"
 
         batch["patient_name"] = ""
         batch["patient_id"] = ""

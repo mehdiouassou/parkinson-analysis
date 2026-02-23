@@ -39,8 +39,11 @@ class ProcessRequest(BaseModel):
 
 class RecordingStartRequest(BaseModel):
     """Request to start a new recording session."""
-    patientName: str = ""
     patientId: str = ""
+
+class RecordingStopRequest(BaseModel):
+    """Request to stop a recording session with optional notes."""
+    note: str = ""
 
 
 # =============================================================================

@@ -240,11 +240,25 @@ def _convert_single_camera(job_id: str, cam_num: int, batch_id: str):
     Tries h264_nvenc first (Jetson NVENC), falls back to libx264.
     Updates conversion_jobs[job_id] in-place.
     """
+    start_time = time.time()
     cam_key = f"camera{cam_num}"
+    
+    # Try exact match first
     bag_path = RECORDINGS_DIR / f"{batch_id}_{cam_key}.bag"
-    mp4_path = RECORDINGS_DIR / f"{batch_id}_{cam_key}.mp4"
-    temp_path = RECORDINGS_DIR / f"{batch_id}_{cam_key}.mp4.converting"
-    meta_path = RECORDINGS_DIR / f"{batch_id}_{cam_key}_metadata.json"
+    
+    if not bag_path.exists():
+        # Try finding new style: cam_num 1 -> CF, cam_num 2 -> CS
+        suffix = "CF" if cam_num == 1 else "CS"
+        # Search for pattern {batch_id}_{suffix}*.bag
+        candidates = list(RECORDINGS_DIR.glob(f"{batch_id}_{suffix}*.bag"))
+        if candidates:
+            bag_path = candidates[0]
+            print(f"[Conversion] Found renamed bag for {cam_key}: {bag_path.name}")
+
+    base_name = bag_path.stem
+    mp4_path = RECORDINGS_DIR / f"{base_name}.mp4"
+    temp_path = RECORDINGS_DIR / f"{base_name}.mp4.converting"
+    meta_path = RECORDINGS_DIR / f"{base_name}_metadata.json"
 
     # ---- Helpers ----
 
@@ -527,6 +541,8 @@ def _convert_single_camera(job_id: str, cam_num: int, batch_id: str):
             "output_size_mb": output_size_mb,
         })
 
+        duration = round(time.time() - start_time, 2)
+
         _update_metadata_sidecar(
             meta_path, mp4_path.name, mp4_frames,
             patient_name=patient_name, patient_id=patient_id,
@@ -536,7 +552,8 @@ def _convert_single_camera(job_id: str, cam_num: int, batch_id: str):
             extra_data={
                 "real_fps": real_fps,
                 "expected_frames": expected_frames,
-                "dropped_frames": dropped_frames
+                "dropped_frames": dropped_frames,
+                "conversion_duration_s": duration
             }
         )
         return  # Done

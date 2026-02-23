@@ -10,5 +10,7 @@
 opencv-python
 
 # Ultralytics (YOLO)
-# Note: If installing fresh, use: pip install ultralytics --no-deps
-ultralytics
+# Note: We install with --no-deps to avoid pulling in 'polars' which fails to build on Jetson
+# and to avoid overwriting NVIDIA's torch/torchvision wheels.
+# Run: pip install ultralytics==8.4.14 --no-deps
+# ultralytics

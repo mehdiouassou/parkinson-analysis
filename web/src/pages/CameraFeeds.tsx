@@ -21,7 +21,7 @@ interface CameraInfo {
 export default function CameraFeeds() {
   const [recordingState, setRecordingState] = useState<RecordingState>('idle');
   const [patientId, setPatientId] = useState('');
-  const [patientName, setPatientName] = useState('');
+  const [note, setNote] = useState('');
   const [cameraKey, setCameraKey] = useState(Date.now());
   const [camerasInfo, setCamerasInfo] = useState<CameraInfo[]>([]);
   const [isSwapped, setIsSwapped] = useState(false);
@@ -116,7 +116,6 @@ export default function CameraFeeds() {
         const data = await res.json();
         if (mountedRef.current && (data.status === 'recording' || data.status === 'paused' || data.status === 'warming_up')) {
           setRecordingState(data.status as RecordingState);
-          if (data.patient_name) setPatientName(data.patient_name);
           if (data.patient_id) setPatientId(data.patient_id);
         }
       } catch (error: any) {
@@ -246,8 +245,8 @@ export default function CameraFeeds() {
   const refreshInFlight = useRef(false);
 
   const handleRecord = async () => {
-    if (!patientName.trim() || !patientId.trim()) {
-      showToast('Please enter patient name and ID before recording', 'error');
+    if (!patientId.trim()) {
+      showToast('Please enter patient ID before recording', 'error');
       return;
     }
     if (detectedCount === 0) {
@@ -261,7 +260,7 @@ export default function CameraFeeds() {
       const res = await fetch(`${API_URL}/recording/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ patientName, patientId }),
+        body: JSON.stringify({ patientId }),
       });
       if (!mountedRef.current) return;
       if (!res.ok) {
@@ -342,7 +341,11 @@ export default function CameraFeeds() {
     actionInFlight.current = true;
     setRecordingState('stopping');
     try {
-      const res = await fetch(`${API_URL}/recording/stop`, { method: 'POST' });
+      const res = await fetch(`${API_URL}/recording/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note })
+      });
       const data = await res.json();
       if (!mountedRef.current) return;
       setRecordingState('idle');
@@ -436,19 +439,21 @@ export default function CameraFeeds() {
             <label className="text-sm font-medium text-clinical-text-secondary dark:text-clinical-text-dark-secondary whitespace-nowrap">Patient:</label>
             <input
               type="text"
-              value={patientName}
-              onChange={(e) => setPatientName(e.target.value)}
-              placeholder="Name"
-              disabled={recordingState !== 'idle'}
-              className="w-32 px-2 py-1.5 text-sm bg-clinical-bg dark:bg-clinical-dark-bg border border-clinical-border dark:border-clinical-dark-border rounded text-clinical-text-primary dark:text-clinical-text-dark disabled:opacity-50"
-            />
-            <input
-              type="text"
               value={patientId}
               onChange={(e) => setPatientId(e.target.value)}
               placeholder="ID"
               disabled={recordingState !== 'idle'}
-              className="w-24 px-2 py-1.5 text-sm bg-clinical-bg dark:bg-clinical-dark-bg border border-clinical-border dark:border-clinical-dark-border rounded text-clinical-text-primary dark:text-clinical-text-dark disabled:opacity-50"
+              className="w-32 px-2 py-1.5 text-sm bg-clinical-bg dark:bg-clinical-dark-bg border border-clinical-border dark:border-clinical-dark-border rounded text-clinical-text-primary dark:text-clinical-text-dark disabled:opacity-50"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+             <label className="text-sm font-medium text-clinical-text-secondary dark:text-clinical-text-dark-secondary whitespace-nowrap">Note:</label>
+             <input
+              type="text"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Session Note"
+              className="w-48 px-2 py-1.5 text-sm bg-clinical-bg dark:bg-clinical-dark-bg border border-clinical-border dark:border-clinical-dark-border rounded text-clinical-text-primary dark:text-clinical-text-dark"
             />
           </div>
 

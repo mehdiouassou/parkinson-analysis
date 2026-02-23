@@ -351,22 +351,30 @@ def calculate_keypoint_motion(prev_landmarks: dict, curr_landmarks: dict) -> dic
         prev_pts = prev_landmarks.get(key, [])
         curr_pts = curr_landmarks.get(key, [])
         if prev_pts and curr_pts:
-            dx = curr_pts[0]["x"] - prev_pts[0]["x"]
-            dy = curr_pts[0]["y"] - prev_pts[0]["y"]
-            dist = np.sqrt(dx * dx + dy * dy)
-            point_motions.append(dist)
-            total_motion += dist
+            # Check if either point has zero confidence (failed detection)
+            # YOLOv8-Pose usually gives (0,0) with conf < threshold
+            # Assume we only use points with valid confidence if available, 
+            # or check coordinates > 0
+            if (curr_pts[0]["x"] > 0 or curr_pts[0]["y"] > 0) and \
+               (prev_pts[0]["x"] > 0 or prev_pts[0]["y"] > 0):
+                dx = curr_pts[0]["x"] - prev_pts[0]["x"]
+                dy = curr_pts[0]["y"] - prev_pts[0]["y"]
+                dist = np.sqrt(dx * dx + dy * dy)
+                point_motions.append(dist)
+                total_motion += dist
 
     # Ears (list of 2) — optional based on config
     if "ears" in motion_kps:
         prev_ears = prev_landmarks.get("ears", [])
         curr_ears = curr_landmarks.get("ears", [])
         for i in range(min(len(prev_ears), len(curr_ears))):
-            dx = curr_ears[i]["x"] - prev_ears[i]["x"]
-            dy = curr_ears[i]["y"] - prev_ears[i]["y"]
-            dist = np.sqrt(dx * dx + dy * dy)
-            point_motions.append(dist)
-            total_motion += dist
+            if (curr_ears[i]["x"] > 0 or curr_ears[i]["y"] > 0) and \
+               (prev_ears[i]["x"] > 0 or prev_ears[i]["y"] > 0):
+                dx = curr_ears[i]["x"] - prev_ears[i]["x"]
+                dy = curr_ears[i]["y"] - prev_ears[i]["y"]
+                dist = np.sqrt(dx * dx + dy * dy)
+                point_motions.append(dist)
+                total_motion += dist
 
     avg_motion = total_motion / max(len(point_motions), 1)
     max_motion = max(point_motions) if point_motions else 0
@@ -400,11 +408,30 @@ def process_video(job_id: str, camera_num: int, batch_id: str):
         camera_num: Camera number (1 or 2)
         batch_id: Video batch ID (timestamp prefix)
     """
+    start_time = time.time()
     try:
         # Priority: BAG (RealSense depth + RGB) > MP4 (compressed preview)
-        bag_file = RECORDINGS_DIR / f"{batch_id}_camera{camera_num}.bag"
-        mp4_file = RECORDINGS_DIR / f"{batch_id}_camera{camera_num}.mp4"
-        metadata_file = RECORDINGS_DIR / f"{batch_id}_camera{camera_num}_metadata.json"
+        cam_key = f"camera{camera_num}"
+        
+        # Default assumption: old naming convention
+        bag_file = RECORDINGS_DIR / f"{batch_id}_{cam_key}.bag"
+        
+        # If not found, check for new naming convention (CF/CS)
+        if not bag_file.exists():
+            suffix = "CF" if camera_num == 1 else "CS"
+            # Pattern: YYYY-MM-DD_HH-MM-SS_CF_note.bag or just _CF.bag
+            candidates = list(RECORDINGS_DIR.glob(f"{batch_id}_{suffix}*.bag"))
+            if candidates:
+                bag_file = candidates[0]
+                print(f"[Processing] Found renamed bag for {cam_key}: {bag_file.name}")
+            else:
+                # If still not found, check if it's the old naming but maybe with extra suffix? Unlikely but safe.
+                # Actually, if we didn't find the bag, we might still find an MP4 later.
+                pass
+
+        base_name = bag_file.stem
+        mp4_file = RECORDINGS_DIR / f"{base_name}.mp4"
+        metadata_file = RECORDINGS_DIR / f"{base_name}_metadata.json"
 
         # Determine which file to use
         video_file = None
@@ -416,7 +443,18 @@ def process_video(job_id: str, camera_num: int, batch_id: str):
         elif mp4_file.exists():
             video_file = mp4_file
         else:
-            raise FileNotFoundError(f"No video file found for {batch_id}_camera{camera_num}")
+            # Try finding just MP4 if bag missing
+             if not mp4_file.exists():
+                suffix = "CF" if camera_num == 1 else "CS"
+                candidates = list(RECORDINGS_DIR.glob(f"{batch_id}_{suffix}*.mp4"))
+                if candidates:
+                    mp4_file = candidates[0]
+                    video_file = mp4_file
+                    metadata_file = RECORDINGS_DIR / f"{mp4_file.stem}_metadata.json"
+             
+             if not video_file or not video_file.exists():
+                raise FileNotFoundError(f"No video file found for {batch_id} camera {camera_num}")
+        
         
         
         # ---------------------------------------------------------------------
@@ -722,6 +760,24 @@ def process_video(job_id: str, camera_num: int, batch_id: str):
 
             "status": "completed"
         }
+
+        # --- TIMING LOGIC ---
+        end_time = time.time()
+        duration = round(end_time - start_time, 2)
+        
+        if metadata_file.exists():
+            try:
+                meta = json.loads(metadata_file.read_text())
+                meta["processing_duration_s"] = duration
+                
+                conv_dur = meta.get("conversion_duration_s")
+                if conv_dur:
+                     meta["total_duration_s"] = round(duration + float(conv_dur), 2)
+                     
+                metadata_file.write_text(json.dumps(meta, indent=2))
+                print(f"[Processing] Updated metadata with duration: {duration}s")
+            except Exception as e:
+                print(f"[Processing] Failed to update metadata duration: {e}")
         
         # Save analysis result
         result_filename = f"{batch_id}_camera{camera_num}_analysis.json"
