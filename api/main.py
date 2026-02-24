@@ -879,21 +879,6 @@ def get_cameras_info():
 
 
 
-@app.post("/cameras/refresh")
-def refresh_cameras():
-    """
-    Re-read camera info without stopping or restarting cameras.
-
-    Use this to update the frontend's display of camera metadata
-    (serial numbers, USB type, running status).  Non-destructive.
-    """
-    detected = get_detected_cameras()
-    return {
-        "message": "Camera info refreshed",
-        "detected": detected
-    }
-
-
 @app.post("/cameras/restart")
 def restart_cameras():
     """

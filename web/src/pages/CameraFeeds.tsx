@@ -26,7 +26,6 @@ export default function CameraFeeds() {
   const [camerasInfo, setCamerasInfo] = useState<CameraInfo[]>([]);
   const [isSwapped, setIsSwapped] = useState(false);
   const [isSwapping, setIsSwapping] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [detectedCount, setDetectedCount] = useState<number | null>(null);
 
   // Camera status: tracks only errors. Null = normal (streaming or waiting for first frame)
@@ -241,8 +240,7 @@ export default function CameraFeeds() {
 
   // api call handlers - track in-flight to prevent double-clicks
   const actionInFlight = useRef(false);
-  // Separate ref for refresh so it never blocks record/pause/stop and vice-versa
-  const refreshInFlight = useRef(false);
+
 
   const handleRecord = async () => {
     if (!patientId.trim()) {
@@ -250,7 +248,7 @@ export default function CameraFeeds() {
       return;
     }
     if (detectedCount === 0) {
-      showToast('No cameras connected. Plug in a camera and hit Refresh.', 'error');
+      showToast('No cameras connected. Plug in a camera and hit Restart Camera.', 'error');
       return;
     }
     if (actionInFlight.current) return;
@@ -360,36 +358,6 @@ export default function CameraFeeds() {
       }
     } finally {
       actionInFlight.current = false;
-    }
-  };
-
-  const handleRefresh = async () => {
-    // Lightweight: just re-read camera info, no stop/restart
-    if (refreshInFlight.current) return;
-    refreshInFlight.current = true;
-    setIsRefreshing(true);
-
-    try {
-      const res = await fetch(`${API_URL}/cameras/refresh`, { method: 'POST' });
-      if (!res.ok) throw new Error('Refresh failed');
-
-      const infoRes = await fetch(`${API_URL}/cameras/info`);
-      if (!infoRes.ok) throw new Error('Failed to get camera info');
-      const infoData = await infoRes.json();
-
-      if (mountedRef.current) {
-        setCamerasInfo(infoData.cameras || []);
-        const found = Object.keys(infoData.detected_devices || {}).length;
-        setDetectedCount(found);
-        setCameraKey(Date.now());
-        showToast(`${found} camera${found !== 1 ? 's' : ''} detected`, found > 0 ? 'success' : 'info');
-      }
-    } catch (error) {
-      console.error('Failed to refresh cameras:', error);
-      if (mountedRef.current) showToast('Failed to refresh cameras', 'error');
-    } finally {
-      if (mountedRef.current) setIsRefreshing(false);
-      refreshInFlight.current = false;
     }
   };
 
@@ -733,31 +701,6 @@ export default function CameraFeeds() {
             {isSwapped ? 'Cameras Swapped' : 'Swap Cameras'}
           </button>
 
-          {/* Refresh Cameras button — just re-reads info */}
-          <button
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-            title="Re-read camera info (non-destructive)"
-            className="flex items-center px-4 py-2 rounded text-sm font-semibold transition-colors border bg-clinical-bg dark:bg-clinical-dark-bg border-clinical-border dark:border-clinical-dark-border text-clinical-text-secondary dark:text-clinical-text-dark-secondary hover:bg-clinical-border dark:hover:bg-clinical-dark-border disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isRefreshing ? (
-              <>
-                <svg className="w-4 h-4 mr-1.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                </svg>
-                Refreshing…
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                Refresh
-              </>
-            )}
-          </button>
-
           {/* Restart Cameras button — hard pipeline restart */}
           <button
             onClick={handleRestart}
@@ -778,7 +721,7 @@ export default function CameraFeeds() {
                 <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 5.636a9 9 0 1012.728 0M12 3v9" />
                 </svg>
-                Restart
+                Restart Camera
               </>
             )}
           </button>
