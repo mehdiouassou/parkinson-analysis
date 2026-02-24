@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useBlocker } from 'react-router-dom';
-import { useToast } from '../components/Toast';
+import { useToast } from '../components/useToast';
 import { API_URL } from '../config';
 
 // ─── Icons ────────────────────────────────────────────────────────────────────

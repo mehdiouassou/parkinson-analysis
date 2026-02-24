@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useBlocker } from 'react-router-dom';
-import { useToast } from '../components/Toast';
+import { useToast } from '../components/useToast';
 import { API_URL } from '../config';
 
 type RecordingState = 'idle' | 'initializing' | 'warming_up' | 'recording' | 'paused' | 'stopping';
@@ -17,6 +17,15 @@ interface CameraInfo {
     preview: string;
   };
 }
+
+const STATUS_STYLES: Record<RecordingState, { badge: string; dot: string; label: string }> = {
+  idle:         { badge: 'bg-clinical-ready/10 text-clinical-ready border border-clinical-ready/30',     dot: 'bg-clinical-ready',                label: 'READY' },
+  initializing: { badge: 'bg-clinical-warning/10 text-clinical-warning border border-clinical-warning/30', dot: 'bg-clinical-warning animate-pulse', label: 'STARTING' },
+  warming_up:   { badge: 'bg-amber-500/10 text-amber-500 border border-amber-500/30',                   dot: 'bg-amber-500 animate-ping',         label: 'WARMING UP' },
+  recording:    { badge: 'bg-clinical-record/10 text-clinical-record border border-clinical-record/30',  dot: 'bg-clinical-record animate-pulse',   label: 'REC' },
+  paused:       { badge: 'bg-clinical-warning/10 text-clinical-warning border border-clinical-warning/30', dot: 'bg-clinical-warning',              label: 'PAUSED' },
+  stopping:     { badge: 'bg-clinical-warning/10 text-clinical-warning border border-clinical-warning/30', dot: 'bg-clinical-warning animate-pulse', label: 'STOPPING' },
+};
 
 export default function CameraFeeds() {
   const [recordingState, setRecordingState] = useState<RecordingState>('idle');
@@ -70,12 +79,13 @@ export default function CameraFeeds() {
   // Cleanup on unmount
   useEffect(() => {
     mountedRef.current = true;
+    const cam0 = cam0Ref.current;
+    const cam1 = cam1Ref.current;
     return () => {
       mountedRef.current = false;
       abortRef.current?.abort();
-      // Force-close MJPEG connections so old gen_frames threads exit
-      if (cam0Ref.current) cam0Ref.current.src = '';
-      if (cam1Ref.current) cam1Ref.current.src = '';
+      if (cam0) cam0.src = '';
+      if (cam1) cam1.src = '';
     };
   }, []);
 
@@ -104,8 +114,8 @@ export default function CameraFeeds() {
           setCamerasInfo(data.cameras);
           setDetectedCount(Object.keys(data.detected_devices || {}).length);
         }
-      } catch (error: any) {
-        if (error.name !== 'AbortError') console.error('Failed to fetch camera info:', error);
+      } catch (err) {
+        if (err instanceof Error && err.name !== 'AbortError') console.error('Failed to fetch camera info:', err);
       }
     };
 
@@ -117,8 +127,8 @@ export default function CameraFeeds() {
           setRecordingState(data.status as RecordingState);
           if (data.patient_id) setPatientId(data.patient_id);
         }
-      } catch (error: any) {
-        if (error.name !== 'AbortError') console.error('Failed to fetch recording status:', error);
+      } catch (err) {
+        if (err instanceof Error && err.name !== 'AbortError') console.error('Failed to fetch recording status:', err);
       }
     };
 
@@ -127,8 +137,8 @@ export default function CameraFeeds() {
         const res = await fetch(`${API_URL}/cameras/swap-state`, { signal: controller.signal });
         const data = await res.json();
         if (mountedRef.current) setIsSwapped(!!data.is_swapped);
-      } catch (error: any) {
-        if (error.name !== 'AbortError') console.error('Failed to fetch swap state:', error);
+      } catch (err) {
+        if (err instanceof Error && err.name !== 'AbortError') console.error('Failed to fetch swap state:', err);
       }
     };
 
@@ -139,18 +149,6 @@ export default function CameraFeeds() {
 
     return () => controller.abort();
   }, []);
-
-  // Helper to get camera type label (RealSense-only system)
-  const getCameraTypeLabel = (camIndex: number) => {
-    const cam = camerasInfo.find(c => c.camera_id === camIndex);
-    if (!cam) return '';
-    return 'RealSense';
-  };
-
-  // Recording format info (RealSense-only: BAG + MP4)
-  const getRecordingFormat = () => {
-    return 'Files saved as BAG + MP4';
-  };
 
   // Poll /recording/status every second while active to sync state and live metrics
   useEffect(() => {
@@ -193,8 +191,8 @@ export default function CameraFeeds() {
         setWarmupRemaining(data.warmup_remaining ?? null);
         setFrameCounts(data.frame_counts ?? {});
         setCurrentFilenames(data.current_filenames ?? {});
-      } catch (error: any) {
-        if (error.name !== 'AbortError') console.error('Failed to poll recording status:', error);
+      } catch (err) {
+        if (err instanceof Error && err.name !== 'AbortError') console.error('Failed to poll recording status:', err);
       }
     };
 
@@ -236,6 +234,7 @@ export default function CameraFeeds() {
   const currentTime = clock.toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
+    second: '2-digit',
   });
 
   // api call handlers - track in-flight to prevent double-clicks
@@ -439,41 +438,9 @@ export default function CameraFeeds() {
 
           {/* Status section — badge + live metrics */}
           <div className="flex items-center gap-3 flex-wrap">
-            <span
-              className={`inline-flex items-center px-3 py-1 rounded text-sm font-medium ${recordingState === 'recording'
-                ? 'bg-clinical-record/10 text-clinical-record border border-clinical-record/30'
-                : recordingState === 'paused'
-                  ? 'bg-clinical-warning/10 text-clinical-warning border border-clinical-warning/30'
-                  : recordingState === 'warming_up'
-                    ? 'bg-amber-500/10 text-amber-500 border border-amber-500/30'
-                    : recordingState === 'initializing' || recordingState === 'stopping'
-                      ? 'bg-clinical-warning/10 text-clinical-warning border border-clinical-warning/30'
-                      : 'bg-clinical-ready/10 text-clinical-ready border border-clinical-ready/30'
-                }`}
-            >
-              <span
-                className={`w-2 h-2 rounded-full mr-2 ${recordingState === 'recording'
-                  ? 'bg-clinical-record animate-pulse'
-                  : recordingState === 'paused'
-                    ? 'bg-clinical-warning'
-                    : recordingState === 'warming_up'
-                      ? 'bg-amber-500 animate-ping'
-                      : recordingState === 'initializing' || recordingState === 'stopping'
-                        ? 'bg-clinical-warning animate-pulse'
-                        : 'bg-clinical-ready'
-                  }`}
-              />
-              {recordingState === 'recording'
-                ? 'REC'
-                : recordingState === 'paused'
-                  ? 'PAUSED'
-                  : recordingState === 'warming_up'
-                    ? 'WARMING UP'
-                    : recordingState === 'initializing'
-                      ? 'STARTING'
-                      : recordingState === 'stopping'
-                        ? 'STOPPING'
-                        : 'READY'}
+            <span className={`inline-flex items-center px-3 py-1 rounded text-sm font-medium ${STATUS_STYLES[recordingState].badge}`}>
+              <span className={`w-2 h-2 rounded-full mr-2 ${STATUS_STYLES[recordingState].dot}`} />
+              {STATUS_STYLES[recordingState].label}
             </span>
 
             {/* Warm-up countdown */}
@@ -515,10 +482,8 @@ export default function CameraFeeds() {
             <div className="flex items-center gap-1.5">
               <span className={`w-2 h-2 rounded-full ${camOffline.cam0 ? 'bg-clinical-record' : 'bg-clinical-ready'}`} />
               <span className="text-sm font-medium text-clinical-text-primary dark:text-clinical-text-dark">CAM1 — Front</span>
-              {getCameraTypeLabel(0) && (
-                <span className={`text-xs px-1.5 py-0.5 rounded ${getCameraTypeLabel(0) === 'RealSense' ? 'bg-blue-500/20 text-blue-400' : 'bg-gray-500/20 text-gray-400'}`}>
-                  {getCameraTypeLabel(0)}
-                </span>
+              {camerasInfo.some(c => c.camera_id === 0) && (
+                <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400">RealSense</span>
               )}
             </div>
             <span className="text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary font-mono">{camerasInfo.find(c => c.camera_id === 0)?.frame_size?.join('×') || '—'}</span>
@@ -561,10 +526,8 @@ export default function CameraFeeds() {
             <div className="flex items-center gap-1.5">
               <span className={`w-2 h-2 rounded-full ${camOffline.cam1 ? 'bg-clinical-record' : 'bg-clinical-ready'}`} />
               <span className="text-sm font-medium text-clinical-text-primary dark:text-clinical-text-dark">CAM2 — Side</span>
-              {getCameraTypeLabel(1) && (
-                <span className={`text-xs px-1.5 py-0.5 rounded ${getCameraTypeLabel(1) === 'RealSense' ? 'bg-blue-500/20 text-blue-400' : 'bg-gray-500/20 text-gray-400'}`}>
-                  {getCameraTypeLabel(1)}
-                </span>
+              {camerasInfo.some(c => c.camera_id === 1) && (
+                <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400">RealSense</span>
               )}
             </div>
             <span className="text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary font-mono">{camerasInfo.find(c => c.camera_id === 1)?.frame_size?.join('×') || '—'}</span>
@@ -725,10 +688,6 @@ export default function CameraFeeds() {
               </>
             )}
           </button>
-
-          <span className="text-sm text-clinical-text-secondary dark:text-clinical-text-dark-secondary ml-4">
-            {getRecordingFormat()}
-          </span>
         </div>
       </div>
     </div>

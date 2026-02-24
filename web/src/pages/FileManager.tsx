@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useToast } from '../components/Toast';
+import { useToast } from '../components/useToast';
 import { API_URL } from '../config';
 
 interface VideoFile {
@@ -125,25 +125,29 @@ export default function FileManager() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'videos' | 'csvs' | 'jsons'>('videos');
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleteAllConfirm, setDeleteAllConfirm] = useState<'videos' | 'csvs' | 'jsons' | null>(null);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [downloadingFiles, setDownloadingFiles] = useState<Set<string>>(new Set());
   const [downloadProgress, setDownloadProgress] = useState<Record<string, DownloadProgress>>({});
   const [downloadControllers, setDownloadControllers] = useState<Record<string, AbortController>>({});
   const mountedRef = useRef(true);
   const { showToast } = useToast();
 
-  // Cleanup on unmount - abort all active downloads
+  const downloadControllersRef = useRef(downloadControllers);
+  downloadControllersRef.current = downloadControllers;
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      // Abort all active downloads
-      Object.values(downloadControllers).forEach(c => c.abort());
+      Object.values(downloadControllersRef.current).forEach(c => c.abort());
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Clear delete confirmation when switching tabs
   useEffect(() => {
     setDeleteConfirm(null);
+    setDeleteAllConfirm(null);
   }, [activeTab]);
 
   const cancelDownload = (filename: string) => {
@@ -287,7 +291,62 @@ export default function FileManager() {
     setDeleteConfirm(null);
   };
 
+  const handleDeleteAllVideos = async () => {
+    setIsDeletingAll(true);
+    try {
+      const results = await Promise.allSettled(
+        files.videos.map(b =>
+          fetch(`${API_URL}/files/video/${b.batch_id}`, { method: 'DELETE' })
+        )
+      );
+      const failed = results.filter(r => r.status === 'rejected').length;
+      if (failed > 0) showToast(`Deleted with ${failed} error(s)`, 'error');
+      else showToast(`Deleted ${files.videos.length} video batch(es)`, 'success');
+      fetchFiles();
+    } catch {
+      showToast('Failed to delete videos', 'error');
+    }
+    setIsDeletingAll(false);
+    setDeleteAllConfirm(null);
+  };
 
+  const handleDeleteAllCsvs = async () => {
+    setIsDeletingAll(true);
+    try {
+      const results = await Promise.allSettled(
+        files.csvs.map(f =>
+          fetch(`${API_URL}/files/csv/${encodeURIComponent(f.name)}`, { method: 'DELETE' })
+        )
+      );
+      const failed = results.filter(r => r.status === 'rejected').length;
+      if (failed > 0) showToast(`Deleted with ${failed} error(s)`, 'error');
+      else showToast(`Deleted ${files.csvs.length} CSV file(s)`, 'success');
+      fetchFiles();
+    } catch {
+      showToast('Failed to delete CSV files', 'error');
+    }
+    setIsDeletingAll(false);
+    setDeleteAllConfirm(null);
+  };
+
+  const handleDeleteAllJsons = async () => {
+    setIsDeletingAll(true);
+    try {
+      const results = await Promise.allSettled(
+        files.jsons.map(f =>
+          fetch(`${API_URL}/files/json/${encodeURIComponent(f.name)}`, { method: 'DELETE' })
+        )
+      );
+      const failed = results.filter(r => r.status === 'rejected').length;
+      if (failed > 0) showToast(`Deleted with ${failed} error(s)`, 'error');
+      else showToast(`Deleted ${files.jsons.length} JSON file(s)`, 'success');
+      fetchFiles();
+    } catch {
+      showToast('Failed to delete JSON files', 'error');
+    }
+    setIsDeletingAll(false);
+    setDeleteAllConfirm(null);
+  };
 
   const downloadFile = async (type: 'video' | 'bag' | 'csv' | 'json', filename: string) => {
     // Prevent starting duplicate download
@@ -377,8 +436,8 @@ export default function FileManager() {
         }
       }, 2000);
 
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
         if (mountedRef.current) {
           showToast('Download cancelled', 'info');
           setDownloadProgress(prev => {
@@ -488,7 +547,7 @@ export default function FileManager() {
     let key = 0;
 
     // Match different JSON tokens
-    const regex = /("[^"]*")\s*:|"[^"]*"|\b(true|false|null)\b|-?\d+\.?\d*([eE][+-]?\d+)?|[{}\[\],:]|\s+/g;
+    const regex = /("[^"]*")\s*:|"[^"]*"|\b(true|false|null)\b|-?\d+\.?\d*([eE][+-]?\d+)?|[{}[\],:]|\s+/g;
     let match;
     let lastIndex = 0;
 
@@ -573,15 +632,52 @@ export default function FileManager() {
           <h2 className="text-xl font-bold text-clinical-text-primary dark:text-clinical-text-dark">File Manager</h2>
           <p className="text-base text-clinical-text-secondary dark:text-clinical-text-dark-secondary mt-1">Manage recordings and analysis data</p>
         </div>
-        <button
-          onClick={fetchFiles}
-          className="px-5 py-3 text-base font-medium bg-clinical-bg dark:bg-clinical-dark-bg border border-clinical-border dark:border-clinical-dark-border text-clinical-text-secondary dark:text-clinical-text-dark-secondary rounded hover:bg-clinical-border dark:hover:bg-clinical-dark-border transition-colors flex items-center gap-2"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Delete All — contextual per active tab */}
+          {((activeTab === 'videos' && files.videos.length > 0) ||
+            (activeTab === 'csvs' && files.csvs.length > 0) ||
+            (activeTab === 'jsons' && files.jsons.length > 0)) && (
+            deleteAllConfirm === activeTab ? (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-clinical-record whitespace-nowrap">
+                  Delete all {activeTab === 'videos' ? `${files.videos.length} batch(es)` : activeTab === 'csvs' ? `${files.csvs.length} CSV(s)` : `${files.jsons.length} JSON(s)`}?
+                </span>
+                <button
+                  onClick={activeTab === 'videos' ? handleDeleteAllVideos : activeTab === 'csvs' ? handleDeleteAllCsvs : handleDeleteAllJsons}
+                  disabled={isDeletingAll}
+                  className="px-3 py-1.5 bg-clinical-record text-white text-sm font-medium rounded hover:bg-clinical-record-hover transition-colors disabled:opacity-50"
+                >
+                  {isDeletingAll ? 'Deleting...' : 'Confirm'}
+                </button>
+                <button
+                  onClick={() => setDeleteAllConfirm(null)}
+                  className="px-3 py-1.5 bg-clinical-bg dark:bg-clinical-dark-bg border border-clinical-border dark:border-clinical-dark-border text-clinical-text-secondary text-sm font-medium rounded hover:bg-clinical-border dark:hover:bg-clinical-dark-border transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setDeleteAllConfirm(activeTab)}
+                className="px-4 py-2.5 text-sm font-medium bg-clinical-record/10 text-clinical-record border border-clinical-record/20 rounded hover:bg-clinical-record/20 transition-colors flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                Delete All
+              </button>
+            )
+          )}
+          <button
+            onClick={fetchFiles}
+            className="px-5 py-3 text-base font-medium bg-clinical-bg dark:bg-clinical-dark-bg border border-clinical-border dark:border-clinical-dark-border text-clinical-text-secondary dark:text-clinical-text-dark-secondary rounded hover:bg-clinical-border dark:hover:bg-clinical-dark-border transition-colors flex items-center gap-2"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}

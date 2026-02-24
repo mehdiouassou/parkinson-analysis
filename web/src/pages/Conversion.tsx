@@ -74,10 +74,34 @@ export default function Conversion() {
 
   useEffect(() => {
     const savedJobId = localStorage.getItem('conversion_job_id');
-    if (savedJobId && batches.length > 0 && !hasRecovered.current) {
-      hasRecovered.current = true;
-      recoverJobState(savedJobId);
-    }
+    if (!savedJobId || batches.length === 0 || hasRecovered.current) return;
+    hasRecovered.current = true;
+
+    (async () => {
+      try {
+        const res = await fetch(`${API_URL}/conversion/status/${savedJobId}`);
+        const data = await res.json();
+        if (!mountedRef.current) return;
+
+        if (data.success && data.job) {
+          setCurrentJob(data.job);
+          const batch = batches.find((b) => b.batch_id === data.job.batch_id);
+          if (batch) setSelectedBatch(batch);
+
+          if (['pending', 'converting'].includes(data.job.status)) {
+            setIsLoading(true);
+            if (pollingRef.current) clearInterval(pollingRef.current);
+            pollJobStatus(savedJobId);
+            pollingRef.current = setInterval(() => pollJobStatus(savedJobId), 500);
+          }
+        } else {
+          localStorage.removeItem('conversion_job_id');
+        }
+      } catch {
+        localStorage.removeItem('conversion_job_id');
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batches]);
 
   useEffect(() => {
@@ -124,29 +148,6 @@ export default function Conversion() {
     } catch (err) {
       console.error('Failed to fetch batches:', err);
       if (mountedRef.current) setError('Failed to load recordings');
-    }
-  };
-
-  const recoverJobState = async (jobId: string) => {
-    try {
-      const res = await fetch(`${API_URL}/conversion/status/${jobId}`);
-      const data = await res.json();
-      if (!mountedRef.current) return;
-
-      if (data.success && data.job) {
-        setCurrentJob(data.job);
-        const batch = batches.find((b) => b.batch_id === data.job.batch_id);
-        if (batch) setSelectedBatch(batch);
-
-        if (['pending', 'converting'].includes(data.job.status)) {
-          setIsLoading(true);
-          startStatusPolling(jobId);
-        }
-      } else {
-        localStorage.removeItem('conversion_job_id');
-      }
-    } catch {
-      localStorage.removeItem('conversion_job_id');
     }
   };
 

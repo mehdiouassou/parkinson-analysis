@@ -67,13 +67,36 @@ export default function Processing() {
     fetchBatches();
   }, []);
 
-  // check for active job after batches load
   useEffect(() => {
     const savedJobId = localStorage.getItem('processing_job_id');
-    if (savedJobId && batches.length > 0 && !hasRecovered.current) {
-      hasRecovered.current = true;
-      recoverJobState(savedJobId);
-    }
+    if (!savedJobId || batches.length === 0 || hasRecovered.current) return;
+    hasRecovered.current = true;
+
+    (async () => {
+      try {
+        const res = await fetch(`${API_URL}/processing/status/${savedJobId}`);
+        const data = await res.json();
+        if (!mountedRef.current) return;
+
+        if (data.success && data.job) {
+          setCurrentJob(data.job);
+          const batch = batches.find(b => b.batch_id === data.job.batch_id);
+          if (batch) setSelectedBatch(batch);
+
+          if (['pending', 'processing'].includes(data.job.status)) {
+            setIsLoading(true);
+            if (pollingRef.current) clearInterval(pollingRef.current);
+            pollJobStatus(savedJobId);
+            pollingRef.current = setInterval(() => pollJobStatus(savedJobId), 500);
+          }
+        } else {
+          localStorage.removeItem('processing_job_id');
+        }
+      } catch {
+        localStorage.removeItem('processing_job_id');
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batches]);
 
   // save job id to localstorage when processing starts
@@ -117,36 +140,6 @@ export default function Processing() {
     } catch (err) {
       console.error('Failed to fetch batches:', err);
       if (mountedRef.current) setError('Failed to load recordings');
-    }
-  };
-
-  const recoverJobState = async (jobId: string) => {
-    try {
-      const res = await fetch(`${API_URL}/processing/status/${jobId}`);
-      const data = await res.json();
-      if (!mountedRef.current) return;
-
-      if (data.success && data.job) {
-        setCurrentJob(data.job);
-
-        // find and select the batch for this job
-        const batch = batches.find(b => b.batch_id === data.job.batch_id);
-        if (batch) {
-          setSelectedBatch(batch);
-        }
-
-        // resume polling if job is still active
-        if (['pending', 'processing'].includes(data.job.status)) {
-          setIsLoading(true);
-          startStatusPolling(jobId);
-        }
-      } else {
-        // job not found or invalid. clear localstorage
-        localStorage.removeItem('processing_job_id');
-      }
-    } catch (err) {
-      console.error('Failed to recover job state:', err);
-      localStorage.removeItem('processing_job_id');
     }
   };
 
@@ -416,61 +409,40 @@ export default function Processing() {
 
         {/* Progress bars */}
         <div className="space-y-6">
-          {/* Camera 1 progress */}
-          <div>
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-base font-medium text-clinical-text-primary dark:text-clinical-text-dark">CF — Camera Front</span>
-              <span className="text-base font-mono font-semibold text-clinical-text-secondary dark:text-clinical-text-dark-secondary">
-                {currentJob ? `${currentJob.camera1_progress}%` : '0%'}
-              </span>
-            </div>
-            <div className="w-full bg-clinical-border dark:bg-clinical-dark-border rounded h-3 overflow-hidden">
-              <div
-                className={`h-full transition-all duration-500 ease-out ${currentJob ? getProgressColor(currentJob.camera1_status) : 'bg-clinical-border'}`}
-                style={{ width: `${currentJob?.camera1_progress || 0}%` }}
-              />
-            </div>
-            <p className="mt-2 text-sm font-semibold text-clinical-text-secondary dark:text-clinical-text-dark-secondary">
-              {currentJob?.camera1_step || 'Waiting to start...'}
-            </p>
-            {currentJob?.camera1_error && (
-              <p className="mt-1.5 text-sm font-medium text-clinical-record">{currentJob.camera1_error}</p>
-            )}
-            {currentJob?.camera1_result && (
-              <p className="mt-1.5 text-sm font-medium text-clinical-ready flex items-center gap-1">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                Saved: {currentJob.camera1_result}
-              </p>
-            )}
-          </div>
-
-          {/* Camera 2 progress */}
-          <div>
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-base font-medium text-clinical-text-primary dark:text-clinical-text-dark">CS — Camera Side</span>
-              <span className="text-base font-mono font-semibold text-clinical-text-secondary dark:text-clinical-text-dark-secondary">
-                {currentJob ? `${currentJob.camera2_progress}%` : '0%'}
-              </span>
-            </div>
-            <div className="w-full bg-clinical-border dark:bg-clinical-dark-border rounded h-3 overflow-hidden">
-              <div
-                className={`h-full transition-all duration-500 ease-out ${currentJob ? getProgressColor(currentJob.camera2_status) : 'bg-clinical-border'}`}
-                style={{ width: `${currentJob?.camera2_progress || 0}%` }}
-              />
-            </div>
-            <p className="mt-2 text-sm font-semibold text-clinical-text-secondary dark:text-clinical-text-dark-secondary">
-              {currentJob?.camera2_step || 'Waiting to start...'}
-            </p>
-            {currentJob?.camera2_error && (
-              <p className="mt-1.5 text-sm font-medium text-clinical-record">{currentJob.camera2_error}</p>
-            )}
-            {currentJob?.camera2_result && (
-              <p className="mt-1.5 text-sm font-medium text-clinical-ready flex items-center gap-1">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                Saved: {currentJob.camera2_result}
-              </p>
-            )}
-          </div>
+          {[
+            { label: 'CF — Camera Front', progress: currentJob?.camera1_progress, status: currentJob?.camera1_status, step: currentJob?.camera1_step, error: currentJob?.camera1_error, result: currentJob?.camera1_result },
+            { label: 'CS — Camera Side', progress: currentJob?.camera2_progress, status: currentJob?.camera2_status, step: currentJob?.camera2_step, error: currentJob?.camera2_error, result: currentJob?.camera2_result },
+          ].map(({ label, progress, status, step, error, result }) => {
+            const active = currentJob != null && (progress ?? -1) >= 0;
+            return (
+              <div key={label}>
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-base font-medium text-clinical-text-primary dark:text-clinical-text-dark">{label}</span>
+                  <span className="text-base font-mono font-semibold text-clinical-text-secondary dark:text-clinical-text-dark-secondary">
+                    {active ? `${progress}%` : '—'}
+                  </span>
+                </div>
+                <div className="w-full bg-clinical-border dark:bg-clinical-dark-border rounded h-3 overflow-hidden">
+                  <div
+                    className={`h-full transition-all duration-500 ease-out ${active && status ? getProgressColor(status) : 'bg-clinical-border'}`}
+                    style={{ width: `${active ? progress : 0}%` }}
+                  />
+                </div>
+                <p className="mt-2 text-sm font-semibold text-clinical-text-secondary dark:text-clinical-text-dark-secondary">
+                  {step || (currentJob ? '—' : 'Waiting to start...')}
+                </p>
+                {error && (
+                  <p className="mt-1.5 text-sm font-medium text-clinical-record">{error}</p>
+                )}
+                {result && (
+                  <p className="mt-1.5 text-sm font-medium text-clinical-ready flex items-center gap-1">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                    Saved: {result}
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {/* Completion message */}
