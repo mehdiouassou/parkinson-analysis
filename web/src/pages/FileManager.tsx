@@ -29,9 +29,9 @@ interface VideoBatch {
   camera1_type: 'realsense' | null;
   camera2_type: 'realsense' | null;
   modified: string;
-  patient_name?: string;
   patient_id?: string;
   recorded_at?: string;
+  note?: string;
 }
 
 interface FileInfo {
@@ -629,14 +629,25 @@ export default function FileManager() {
                   >
                     <div className="flex items-center justify-between">
                       <div>
+                        <div className="flex flex-col gap-1.5 mb-2">
+                           {batch.patient_id && (
+                             <div className="flex items-center gap-1.5 w-fit px-2 py-0.5 rounded bg-clinical-bg dark:bg-clinical-dark-bg border border-clinical-border dark:border-clinical-dark-border">
+                               <svg className="w-3.5 h-3.5 text-clinical-text-secondary dark:text-clinical-text-dark-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                 <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2" />
+                               </svg>
+                               <span className="text-xs font-medium text-clinical-text-primary dark:text-clinical-text-dark">{batch.patient_id}</span>
+                             </div>
+                           )}
+                           {batch.note && (
+                             <div className="flex items-center gap-1.5 w-fit px-2 py-0.5 rounded bg-clinical-bg dark:bg-clinical-dark-bg border border-clinical-border dark:border-clinical-dark-border">
+                               <svg className="w-3.5 h-3.5 text-clinical-text-secondary dark:text-clinical-text-dark-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                 <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                               </svg>
+                               <span className="text-xs font-medium text-clinical-text-primary dark:text-clinical-text-dark">{batch.note}</span>
+                             </div>
+                           )}
+                        </div>
                         <h3 className="font-medium text-clinical-text-primary dark:text-clinical-text-dark">{batch.batch_id}</h3>
-                        {(batch.patient_name || batch.patient_id) && (
-                          <p className="text-sm font-medium text-clinical-blue mt-0.5">
-                            {batch.patient_name}
-                            {batch.patient_name && batch.patient_id && <span className="text-clinical-text-secondary dark:text-clinical-text-dark-secondary font-normal"> · </span>}
-                            {batch.patient_id && <span className="font-mono text-clinical-text-secondary dark:text-clinical-text-dark-secondary font-normal">{batch.patient_id}</span>}
-                          </p>
-                        )}
                         <p className="text-sm text-clinical-text-secondary dark:text-clinical-text-dark-secondary mt-1">
                           {formatDate(batch.modified)}
                         </p>
@@ -685,7 +696,7 @@ export default function FileManager() {
                         <div className="flex items-center justify-between">
                           <div>
                             <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium text-clinical-text-primary dark:text-clinical-text-dark">Camera 1</span>
+                              <span className="text-sm font-medium text-clinical-text-primary dark:text-clinical-text-dark">CF — Camera Front</span>
                               {batch.camera1_type && (
                                 <span className="px-1.5 py-0.5 text-xs font-medium rounded bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
                                   RealSense
@@ -807,7 +818,7 @@ export default function FileManager() {
                         <div className="flex items-center justify-between">
                           <div>
                             <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium text-clinical-text-primary dark:text-clinical-text-dark">Camera 2</span>
+                              <span className="text-sm font-medium text-clinical-text-primary dark:text-clinical-text-dark">CS — Camera Side</span>
                               {batch.camera2_type && (
                                 <span className="px-1.5 py-0.5 text-xs font-medium rounded bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
                                   RealSense

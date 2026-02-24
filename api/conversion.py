@@ -184,7 +184,6 @@ def _update_metadata_sidecar(
     mp4_file: str,
     mp4_frames: int,
     *,
-    patient_name: str = "",
     patient_id: str = "",
     camera_view: str = "",
     camera_type: str = CAMERA_TYPE_REALSENSE,
@@ -212,7 +211,6 @@ def _update_metadata_sidecar(
     meta["converted_at"] = datetime.now().isoformat()
 
     # Fill in any fields missing from an older sidecar (or brand-new file)
-    meta.setdefault("patient_name", patient_name)
     meta.setdefault("patient_id", patient_id)
     meta.setdefault("camera_view", camera_view)
     meta.setdefault("camera_type", camera_type)
@@ -305,7 +303,7 @@ def _convert_single_camera(job_id: str, cam_num: int, batch_id: str):
 
     fps: float = DEFAULT_FPS
     camera_view = "Front" if cam_num == 1 else "Side"
-    patient_name = patient_id = camera_mode = recorded_at = ""
+    patient_id = camera_mode = recorded_at = ""
     camera_type = CAMERA_TYPE_REALSENSE
 
     if meta_path.exists():
@@ -313,7 +311,6 @@ def _convert_single_camera(job_id: str, cam_num: int, batch_id: str):
             meta = json.loads(meta_path.read_text())
             fps = float(meta.get("fps", DEFAULT_FPS))
             camera_view = meta.get("camera_view", camera_view)
-            patient_name = meta.get("patient_name", "")
             patient_id = meta.get("patient_id", "")
             camera_type = meta.get("camera_type", camera_type)
             camera_mode = meta.get("camera_mode", "")
@@ -549,7 +546,7 @@ def _convert_single_camera(job_id: str, cam_num: int, batch_id: str):
 
         _update_metadata_sidecar(
             meta_path, mp4_path.name, mp4_frames,
-            patient_name=patient_name, patient_id=patient_id,
+            patient_id=patient_id,
             camera_view=camera_view, camera_type=camera_type,
             fps=actual_fps, camera_mode=camera_mode, recorded_at=recorded_at,
             bag_file=bag_path.name,

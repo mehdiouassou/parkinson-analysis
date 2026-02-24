@@ -85,8 +85,9 @@ interface VideoFile {
   name: string;
   size: number;
   modified: string;
-  patient_name?: string;
+  recorded_at?: string;
   patient_id?: string;
+  note?: string;
   camera_type?: string;
 }
 
@@ -98,7 +99,6 @@ interface ActionLog {
 }
 
 interface VideoMetadata {
-  patient_name: string;
   patient_id: string;
   fps?: number;
 }
@@ -313,8 +313,8 @@ export default function Tagging() {
       const res = await fetch(`${API_URL}/videos/${filename}/metadata`);
       if (!mountedRef.current) return;
       const data = await res.json();
-      setPatientInfo(data.patient_name || data.patient_id
-        ? { patient_name: data.patient_name || '', patient_id: data.patient_id || '', fps: data.fps || undefined }
+      setPatientInfo(data.patient_id
+        ? { patient_id: data.patient_id || '', fps: data.fps || undefined }
         : null
       );
       if (data.fps && data.fps > 0) setVideoFps(data.fps);
@@ -727,9 +727,14 @@ export default function Tagging() {
                     <option value="">Select a video file...</option>
                     {videoFiles.map(file => {
                       const dateLabel = new Date(file.modified).toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' });
-                      const patientLabel = file.patient_name ? ` — ${file.patient_name}` : '';
-                      const viewLabel = file.camera_type ? ` [${file.camera_type}]` : '';
-                      return <option key={file.name} value={file.name}>{dateLabel}{patientLabel}{viewLabel} — {file.name}</option>;
+                      const parts = [
+                        file.patient_id,
+                        file.note,
+                        file.name.replace('.mp4', ''),
+                        file.camera_type ? `[${file.camera_type}]` : ''
+                      ].filter(Boolean);
+                      
+                      return <option key={file.name} value={file.name}>{dateLabel} — {parts.join(' - ')}</option>;
                     })}
                   </select>
                   <svg className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-clinical-text-secondary dark:text-clinical-text-dark-secondary pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
@@ -757,15 +762,13 @@ export default function Tagging() {
               <span className="px-2 py-0.5 text-xs font-mono rounded bg-clinical-bg dark:bg-clinical-dark-bg border border-clinical-border dark:border-clinical-dark-border text-clinical-text-secondary dark:text-clinical-text-dark-secondary">{videoFps} fps</span>
               {(() => {
                 const activeFile = videoFiles.find(f => f.name === selectedFile);
-                const name = patientInfo?.patient_name || activeFile?.patient_name || '';
                 const id = patientInfo?.patient_id || activeFile?.patient_id || '';
                 const date = activeFile?.modified ? new Date(activeFile.modified).toLocaleDateString() : '';
-                if (!name && !id && !date) return null;
+                if (!id && !date) return null;
                 return (
                   <span className="px-2 py-0.5 text-xs font-medium rounded bg-clinical-blue/10 text-clinical-blue border border-clinical-blue/30">
                     {date && <span className="mr-1">{date}</span>}
-                    {name && <span>Patient: {name}</span>}
-                    {id && <span className="ml-1">| ID: {id}</span>}
+                    {id && <span>ID: {id}</span>}
                   </span>
                 );
               })()}

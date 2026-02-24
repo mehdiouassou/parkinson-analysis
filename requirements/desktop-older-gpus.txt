@@ -1,0 +1,29 @@
+# --- GPU SUPPORT FOR OLDER GENERATIONS ---
+# Use this requirements file if you have an older NVIDIA GPU.
+# Specifically, newer PyTorch versions (2.10+) dropped support for 
+# GPUs with CUDA compute capability 6.1 or lower.
+#
+# This file installs PyTorch 2.4.1, the last version supporting these older GPUs.
+#
+# Affected GPU architectures include:
+#   - Pascal architecture (GTX 10-series: 1060, 1070, 1080, Titan Xp)
+#   - Maxwell architecture (GTX 9-series: 970, 980, Titan X)
+#   - Older Quadro and Tesla cards (e.g., P4000, M60)
+#
+# Usage:
+#   pip install -r requirements/desktop-older-gpus.txt
+
+--extra-index-url https://download.pytorch.org/whl/cu121
+
+torch==2.4.1
+torchvision==0.19.1
+torchaudio==2.4.1
+
+# --- APP DEPENDENCIES ---
+-r base.txt
+
+ultralytics
+opencv-python
+pyrealsense2
+onnx
+onnxruntime-gpu

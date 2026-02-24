@@ -103,13 +103,13 @@ Score breakdown: 30pts recording start sync + 20pts frame count sync + 25pts per
 
 ## Deployment
 
-### Option A: Full Development (PC/Laptop)
+### Option A: Full Development (PC/Laptop) \
 
 ```sh
 git clone https://github.com/mehdiouassou/parkinson-analysis.git
 ```
 
-### Option B: Jetson (API only)
+### Option B: API only
 
 ```sh
 mkdir parkinson-project && cd parkinson-project
@@ -138,15 +138,17 @@ git pull origin main
 
 ### Desktop
 
-Requires Python 3.12+.
+Requires Python 3.10/3.11.
 
 ```sh
 cd api
-python -m venv venv
+python3.11 -m virtualenv venv
 source venv/bin/activate       # Windows: venv\Scripts\activate
-pip install -r ../requirements/desktop.txt
-uvicorn main:app --reload
+pip install -r ../requirements/desktop.txt 
+uvicorn main:app --reload --host 0.0.0.0
 ```
+
+Use desktop-older.gpus.txt for older NVIDIA GPUs.
 
 ### Jetson AGX Orin (JetPack 5)
 

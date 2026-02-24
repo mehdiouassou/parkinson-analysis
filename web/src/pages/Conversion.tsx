@@ -16,9 +16,9 @@ interface Batch {
   orphaned: boolean;
   type: 'batch' | 'orphan';
   modified: string | null;
-  patient_name?: string;
   patient_id?: string;
   recorded_at?: string;
+  note?: string;
 }
 
 interface ConversionCameraSlot {
@@ -314,14 +314,16 @@ export default function Conversion() {
                 const dateLabel = dateStr
                   ? new Date(dateStr).toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' })
                   : '—';
-                const patientLabel = batch.patient_name ? ` — ${batch.patient_name}` : '';
                 const camFlags = [
-                  batch.camera1_hq ? `Cam1${batch.camera1_has_mp4 ? '✓' : ''}` : null,
-                  batch.camera2_hq ? `Cam2${batch.camera2_has_mp4 ? '✓' : ''}` : null,
+                  batch.camera1_hq ? `CF${batch.camera1_has_mp4 ? '✓' : ''}` : null,
+                  batch.camera2_hq ? `CS${batch.camera2_has_mp4 ? '✓' : ''}` : null,
                 ].filter(Boolean).join(' ');
+
+                const displayId = [batch.patient_id, batch.batch_id, batch.note].filter(Boolean).join('_');
+
                 return (
                   <option key={batch.batch_id} value={batch.batch_id}>
-                    {dateLabel}{patientLabel} — {batch.batch_id} [{camFlags}]
+                    {dateLabel} — {displayId} [{camFlags}]
                   </option>
                 );
               })}
@@ -347,18 +349,11 @@ export default function Conversion() {
                 <p className="text-sm text-clinical-warning font-medium">⚠ Orphaned Recording — Only one camera file available</p>
               </div>
             )}
-            {(selectedBatch.patient_name || selectedBatch.patient_id) && (
+            {selectedBatch.patient_id && (
               <div className="mb-3 flex items-center gap-3 flex-wrap">
-                {selectedBatch.patient_name && (
-                  <span className="text-sm text-clinical-text-secondary dark:text-clinical-text-dark-secondary">
-                    Patient: <span className="font-medium text-clinical-text-primary dark:text-clinical-text-dark">{selectedBatch.patient_name}</span>
-                  </span>
-                )}
-                {selectedBatch.patient_id && (
-                  <span className="text-sm text-clinical-text-secondary dark:text-clinical-text-dark-secondary">
-                    ID: <span className="font-medium text-clinical-text-primary dark:text-clinical-text-dark">{selectedBatch.patient_id}</span>
-                  </span>
-                )}
+                <span className="text-sm text-clinical-text-secondary dark:text-clinical-text-dark-secondary">
+                  ID: <span className="font-medium text-clinical-text-primary dark:text-clinical-text-dark">{selectedBatch.patient_id}</span>
+                </span>
                 {selectedBatch.recorded_at && (
                   <span className="text-sm text-clinical-text-secondary dark:text-clinical-text-dark-secondary">
                     Recorded: <span className="font-medium text-clinical-text-primary dark:text-clinical-text-dark">{new Date(selectedBatch.recorded_at).toLocaleString()}</span>
@@ -370,7 +365,7 @@ export default function Conversion() {
               {/* Camera 1 */}
               <div className={`p-3 rounded border ${hasBag(selectedBatch, 1) ? 'bg-clinical-ready/5 border-clinical-ready/30' : 'bg-clinical-record/5 border-clinical-record/30'}`}>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <p className="text-sm font-medium text-clinical-text-primary dark:text-clinical-text-dark">Camera 1 — Front</p>
+                  <p className="text-sm font-medium text-clinical-text-primary dark:text-clinical-text-dark">CF — Camera Front</p>
                   {hasBag(selectedBatch, 1) && (
                     <span className="px-1.5 py-0.5 text-xs font-medium rounded bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">BAG</span>
                   )}
@@ -385,7 +380,7 @@ export default function Conversion() {
               {/* Camera 2 */}
               <div className={`p-3 rounded border ${hasBag(selectedBatch, 2) ? 'bg-clinical-ready/5 border-clinical-ready/30' : 'bg-clinical-record/5 border-clinical-record/30'}`}>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <p className="text-sm font-medium text-clinical-text-primary dark:text-clinical-text-dark">Camera 2 — Side</p>
+                  <p className="text-sm font-medium text-clinical-text-primary dark:text-clinical-text-dark">CS — Camera Side</p>
                   {hasBag(selectedBatch, 2) && (
                     <span className="px-1.5 py-0.5 text-xs font-medium rounded bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">BAG</span>
                   )}
@@ -423,8 +418,8 @@ export default function Conversion() {
 
         <div className="space-y-6">
           {[
-            { label: 'Camera 1 — Front', slot: currentJob?.camera1 },
-            { label: 'Camera 2 — Side', slot: currentJob?.camera2 },
+            { label: 'CF — Camera Front', slot: currentJob?.camera1 },
+            { label: 'CS — Camera Side', slot: currentJob?.camera2 },
           ].map(({ label, slot }) => (
             <div key={label}>
               <div className="flex justify-between items-center mb-2 gap-3 flex-wrap">
@@ -432,8 +427,8 @@ export default function Conversion() {
                   <span className="text-base font-medium text-clinical-text-primary dark:text-clinical-text-dark">{label}</span>
                   {slot?.encoder && (
                     <span className={`px-1.5 py-0.5 text-xs font-medium rounded ${!slot.encoder.startsWith('libx')
-                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                        : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300'
+                      ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                      : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300'
                       }`}>
                       {!slot.encoder.startsWith('libx') ? 'HW Accel' : 'CPU'}
                     </span>

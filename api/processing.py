@@ -480,7 +480,7 @@ def process_video(job_id: str, camera_num: int, batch_id: str):
 
         update_job_progress(job_id, camera_num, 5, "Loading metadata...")
 
-        patient_info = {"patient_name": "", "patient_id": "", "recorded_at": ""}
+        patient_info = {"patient_id": "", "recorded_at": ""}
         meta_fps: float | None = None
         if metadata_file.exists():
             try:
@@ -509,8 +509,23 @@ def process_video(job_id: str, camera_num: int, batch_id: str):
         # Use appropriate reader based on file type
         if use_bag:
             cap = BagFileReader(str(video_file))
-            # BAG files don't expose frame count easily, estimate based on duration
-            total_frames = -1  # Unknown, will count during processing
+            total_frames = -1
+
+            # 1. Try metadata JSON (most accurate if recording finished cleanly)
+            if metadata_file.exists():
+                try:
+                    meta = json.loads(metadata_file.read_text())
+                    total_frames = meta.get("bag_frames") or meta.get("mp4_frames") or -1
+                except:
+                    pass
+            
+            # 2. Fallback estimation based on file size if metadata missing
+            if total_frames <= 0:
+                 # Empirical estimate for D455 BAGs (Depth + RGB): ~1.5 frames per MB
+                 size_mb = video_file.stat().st_size / (1024*1024)
+                 total_frames = int(size_mb * 1.5)
+                 print(f"[Processing] Estimated BAG frames from size: {total_frames}")
+
         else:
             cap = cv2.VideoCapture(str(video_file))
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -615,10 +630,11 @@ def process_video(job_id: str, camera_num: int, batch_id: str):
             # Update progress (12% to 90% = 78% range for frame processing)
             if frames_processed % ANALYSIS_CONFIG["progress_update_every_n_frames"] == 0:
                 if total_frames > 0:
-                    progress = 12 + int((frames_processed / total_frames) * 78)
-                    progress = min(progress, 89)
-                    frame_msg = f"Frame {frames_processed}/{total_frames} (detections: {persons_detected})"
+                    pct_complete = min(frames_processed / total_frames, 1.0)
+                    progress = 12 + int(pct_complete * 78)
+                    frame_msg = f"Frame {frames_processed}/{total_frames} ({int(pct_complete*100)}%)"
                 else:
+                    # Logarithmic fallback if total_frames completely unknown
                     REF_FRAMES = 6000
                     progress = 12 + int(78 * math.log1p(frames_processed) / math.log1p(REF_FRAMES))
                     progress = min(progress, 89)
@@ -717,7 +733,6 @@ def process_video(job_id: str, camera_num: int, batch_id: str):
             "processed_at": datetime.now().isoformat(),
 
             "patient": {
-                "name": patient_info.get("patient_name", ""),
                 "id": patient_info.get("patient_id", ""),
                 "recorded_at": patient_info.get("recorded_at", "")
             },
@@ -786,8 +801,31 @@ def process_video(job_id: str, camera_num: int, batch_id: str):
             except Exception as e:
                 print(f"[Processing] Failed to update metadata duration: {e}")
         
-        # Save analysis result
-        result_filename = f"{batch_id}_camera{camera_num}_analysis.json"
+        # Save analysis result with standardized naming:
+        # {batch_id}_{CF|CS}_{patient_id}_{note}_analysis.json
+        
+        # Determine camera label
+        cam_label = "CF" if camera_num == 1 else "CS"
+        
+        # Extract metadata fields
+        patient_id = ""
+        note = ""
+        if metadata_file.exists():
+            try:
+                meta = json.loads(metadata_file.read_text())
+                patient_id = meta.get("patient_id", "")
+                note = meta.get("note", "")
+            except:
+                pass
+        
+        # Build filename parts
+        name_parts = [batch_id, cam_label]
+        if patient_id: name_parts.append(patient_id)
+        if note: name_parts.append(note)
+        name_parts.append("analysis")
+        
+        result_filename = "_".join(name_parts) + ".json"
+        
         result_path = PROCESSED_DIR / result_filename
         result_path.write_text(json.dumps(result_data, indent=2))
         print(f"[Processing] Saved: {result_path}")

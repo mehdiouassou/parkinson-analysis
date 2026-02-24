@@ -38,6 +38,7 @@ import time
 import json
 import subprocess
 import os
+import re
 from datetime import datetime
 from typing import Dict
 
@@ -503,6 +504,11 @@ def start_recording(data: RecordingStartRequest = None):
     Only active (running) cameras get writers. If one camera is offline,
     only the other camera is recorded (orphan mode).
     """
+    patient_id = ""
+    if data and data.patientId:
+        # Sanitize patient_id for filename safety
+        patient_id = re.sub(r'[^\w\-_]', '', data.patientId.strip())
+
     with recording_lock:
         if recording_state["status"] in ("recording", "warming_up", "paused"):
             return JSONResponse(
@@ -517,8 +523,8 @@ def start_recording(data: RecordingStartRequest = None):
     timestamp_str = timestamp.strftime("%Y-%m-%d_%H-%M-%S")
 
     with recording_lock:
-        recording_state["patient_id"] = data.patientId if data else ""
         recording_state["timestamp_str"] = timestamp_str
+        recording_state["patient_id"] = patient_id
         recording_state["warmup_start"] = timestamp
         recording_state["status"] = "warming_up"
 
@@ -685,8 +691,10 @@ def stop_recording(data: RecordingStopRequest = None):
     # ----- Rename BAG files with Note and CF/CS -----
     note = data.note.strip() if data and data.note else ""
     # Sanitize note
-    import re
     safe_note = re.sub(r'[^\w\-_]', '', note)
+    
+    # Sanitize patient_id (ensure filename safety)
+    safe_patient_id = re.sub(r'[^\w\-_]', '', patient_id) if patient_id else ""
     
     renamed_bag_files = []
     
@@ -702,10 +710,14 @@ def stop_recording(data: RecordingStopRequest = None):
             
             cam_label = "CF" if cam_suffix.startswith("1") else "CS"
             
+            # Construct filename: {timestamp}_{CF/CS}_{patient_id}_{note}.bag
+            components = [timestamp_part, cam_label]
+            if safe_patient_id:
+                components.append(safe_patient_id)
             if safe_note:
-                new_filename = f"{timestamp_part}_{cam_label}_{safe_note}.bag"
-            else:
-                new_filename = f"{timestamp_part}_{cam_label}.bag"
+                components.append(safe_note)
+                
+            new_filename = "_".join(components) + ".bag"
                 
             new_path = RECORDINGS_DIR / new_filename
             
@@ -820,7 +832,6 @@ def get_recording_status():
 
         return {
             "status": status,
-            "patient_name": recording_state["patient_name"],
             "patient_id": recording_state["patient_id"],
             "start_time": start_time.isoformat() if start_time else None,
             "duration": duration,
@@ -948,11 +959,13 @@ def list_recordings():
         metadata_path = RECORDINGS_DIR / f"{f.stem}_metadata.json"
         patient_name = ""
         patient_id = ""
+        note = ""
         if metadata_path.exists():
             try:
                 meta = json.loads(metadata_path.read_text())
                 patient_name = meta.get("patient_name", "")
                 patient_id = meta.get("patient_id", "")
+                note = meta.get("note", "")
             except Exception:
                 pass
 
@@ -970,6 +983,7 @@ def list_recordings():
             "format": "mp4",
             "patient_name": patient_name,
             "patient_id": patient_id,
+            "note": note,
             "camera_type": cam_type,
         })
 
@@ -1007,7 +1021,6 @@ def list_batches():
              camera_num = parts_old[1] # "1" or "2"
         else:
              # Try new format
-             # Split by _CF or _CS
              if "_CF" in name:
                  parts_new = name.split('_CF')
                  batch_id = parts_new[0]
@@ -1090,6 +1103,7 @@ def list_batches():
         batch["patient_name"] = ""
         batch["patient_id"] = ""
         batch["recorded_at"] = ""
+        batch["note"] = ""
 
         if meta_path.exists():
             try:
@@ -1097,6 +1111,7 @@ def list_batches():
                 batch["patient_name"] = meta.get("patient_name", "")
                 batch["patient_id"] = meta.get("patient_id", "")
                 batch["recorded_at"] = meta.get("recorded_at", "")
+                batch["note"] = meta.get("note", "")
             except Exception:
                 pass
 
@@ -1125,6 +1140,18 @@ def get_frame_comparison(batch_id: str):
         bag_path = RECORDINGS_DIR / f"{batch_id}_{cam_key}.bag"
         mp4_path = RECORDINGS_DIR / f"{batch_id}_{cam_key}.mp4"
         meta_path = RECORDINGS_DIR / f"{batch_id}_{cam_key}_metadata.json"
+
+        if not bag_path.exists() and not mp4_path.exists():
+            suffix = "CF" if cam_num == 1 else "CS"
+            candidates_bag = list(RECORDINGS_DIR.glob(f"{batch_id}_{suffix}*.bag"))
+            candidates_mp4 = list(RECORDINGS_DIR.glob(f"{batch_id}_{suffix}*.mp4"))
+            if candidates_bag:
+                bag_path = candidates_bag[0]
+                mp4_path = RECORDINGS_DIR / f"{bag_path.stem}.mp4"
+                meta_path = RECORDINGS_DIR / f"{bag_path.stem}_metadata.json"
+            elif candidates_mp4:
+                mp4_path = candidates_mp4[0]
+                meta_path = RECORDINGS_DIR / f"{mp4_path.stem}_metadata.json"
 
         cam_result = {
             "bag_exists": bag_path.exists(),
@@ -1277,15 +1304,63 @@ def get_frame_comparison(batch_id: str):
         start_offset_ok = inter_offset <= 500  # within 500ms
         sync_info["in_sync"] = frame_offset_ok and start_offset_ok
 
+        # Check for significant FPS drops (hardware level)
+        # If real FPS is significantly below target, it indicates USB bandwidth issues or CPU overload
+        fps_issue_detected = False
+        fps_issue_msg = []
+        
+        for cam_key in ["camera1", "camera2"]:
+            cam_data = results.get(cam_key, {})
+            real_fps = cam_data.get("real_fps")
+            dropped = cam_data.get("bag_dropped_frames")
+            expected = cam_data.get("bag_expected_frames")
+
+            # FPS Check
+            if real_fps is not None and fps > 0:
+                # Tolerance: < 85% of target is a warning, < 70% is critical
+                ratio = real_fps / fps
+                if ratio < 0.70: # Critical drop (e.g. 42fps on 60fps target)
+                    fps_issue_detected = True
+                    fps_issue_msg.append(f"{cam_key} FPS critically low ({real_fps:.1f}/{fps})")
+                elif ratio < 0.85: # Moderate drop
+                    fps_issue_msg.append(f"{cam_key} FPS low ({real_fps:.1f}/{fps})")
+            
+            # Dropped Frames Check (if reported by SDK)
+            if dropped is not None and expected is not None and expected > 0:
+                drop_ratio = dropped / expected
+                if drop_ratio > 0.15: # >15% dropped is critical
+                     fps_issue_detected = True
+                     fps_issue_msg.append(f"{cam_key} dropped {dropped} frames ({drop_ratio*100:.0f}%)")
+                elif drop_ratio > 0.05: # >5% dropped is moderate
+                     fps_issue_msg.append(f"{cam_key} dropped {dropped} frames ({drop_ratio*100:.0f}%)")
+
+        # Deduplicate messages
+        fps_issue_msg = list(set(fps_issue_msg))
+
         # Sync quality level for UI
-        if inter_offset <= 100 and sync_info["frame_count_difference"] <= int(fps * 0.5):
+        if fps_issue_detected:
+            sync_info["sync_quality"] = "poor"
+            current_warning = sync_info.get("warning", "")
+            sync_info["warning"] = (current_warning + " " + "; ".join(fps_issue_msg)).strip()
+        elif inter_offset <= 100 and sync_info["frame_count_difference"] <= int(fps * 0.5):
             sync_info["sync_quality"] = "excellent"  # <100ms offset, <0.5s frame diff
+            if fps_issue_msg: # If moderate drops but sync is good, downgrade to good
+                 sync_info["sync_quality"] = "good"
         elif frame_offset_ok and start_offset_ok:
             sync_info["sync_quality"] = "good"
+            if fps_issue_msg:
+                 sync_info["sync_quality"] = "fair"
         elif frame_offset_ok or start_offset_ok:
             sync_info["sync_quality"] = "fair"
         else:
             sync_info["sync_quality"] = "poor"
+            
+        # Append FPS warnings if any, even if not critical (and not already appended)
+        if fps_issue_msg and not fps_issue_detected:
+             current_warning = sync_info.get("warning", "")
+             # Avoid double appending
+             full_warning = (current_warning + " " + "; ".join(fps_issue_msg)).strip()
+             sync_info["warning"] = full_warning
 
         # Warning if bags themselves weren't synced (impacts MP4 sync too)
         if not start_offset_ok:
@@ -1348,7 +1423,6 @@ def get_video_metadata(video_name: str):
     metadata_path = RECORDINGS_DIR / metadata_file
 
     result_metadata = {
-        "patient_name": "",
         "patient_id": "",
         "comment": "",
         "recorded_at": "",
@@ -1362,9 +1436,8 @@ def get_video_metadata(video_name: str):
         try:
             data = json.loads(metadata_path.read_text())
             result_metadata.update({
-                "patient_name": data.get('patient_name', ''),
                 "patient_id": data.get('patient_id', ''),
-                "comment": f"Patient: {data.get('patient_name', '')} | ID: {data.get('patient_id', '')}",
+                "comment": f"Patient ID: {data.get('patient_id', '')}",
                 "recorded_at": data.get('recorded_at', ''),
                 "camera_view": data.get('camera_view', ''),
                 "fps": float(data.get('fps', 0)),
@@ -1390,8 +1463,7 @@ def get_video_metadata(video_name: str):
                     data = json.loads(result.stdout)
                     tags = data.get('format', {}).get('tags', {})
                     result_metadata.update({
-                        "patient_name": tags.get('title', ''),
-                        "patient_id": tags.get('artist', ''),
+                        "patient_id": tags.get('artist', '') or tags.get('title', ''),
                         "comment": tags.get('comment', ''),
                         "source": "embedded"
                     })
@@ -1431,7 +1503,51 @@ def save_tagging(data: SaveTaggingRequest):
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     video_name = data.videoFile.replace('.mp4', '')
-    filename = f"tagging_{video_name}_{timestamp}.csv"
+    
+    # Standardize legacy camera names in filename part
+    video_name = video_name.replace('camera1', 'CF').replace('camera2', 'CS')
+
+    # Fetch metadata to enrich filename
+    metadata_path = RECORDINGS_DIR / f"{data.videoFile.replace('.mp4', '')}_metadata.json"
+    patient_id = ""
+    note = ""
+    if metadata_path.exists():
+        try:
+            meta = json.loads(metadata_path.read_text())
+            patient_id = meta.get("patient_id", "")
+            note = meta.get("note", "")
+        except Exception:
+            pass
+
+    # Construct standardized filename:
+    # {batch_id}_{CF|CS}_{patient_id}_{note}_tagging.csv
+    
+    parts_out = []
+    
+    # 1. Start with batch_id (timestamp)
+    match_batch = re.search(r'(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})', video_name)
+    batch_id = match_batch.group(1) if match_batch else video_name
+    parts_out.append(batch_id)
+
+    # 2. Add Camera ID
+    if "_CF" in video_name:
+        parts_out.append("CF")
+    elif "_CS" in video_name:
+        parts_out.append("CS")
+
+    # 3. Add Patient ID
+    if patient_id:
+        parts_out.append(patient_id)
+
+    # 4. Add Note
+    if note:
+        parts_out.append(note)
+
+    # 5. Add Type
+    parts_out.append("tagging")
+    
+    filename = "_".join(parts_out) + ".csv"
+    filepath = TAGGING_DIR / filename
     filepath = TAGGING_DIR / filename
 
     headers = ['Frame', 'Direction', 'Direction_Human']
@@ -1512,6 +1628,11 @@ def start_processing(data: ProcessRequest):
 
     has_cam1 = camera1_bag.exists() or camera1_mp4.exists()
     has_cam2 = camera2_bag.exists() or camera2_mp4.exists()
+
+    if not has_cam1:
+        has_cam1 = bool(list(RECORDINGS_DIR.glob(f"{batch_id}_CF*.bag")) or list(RECORDINGS_DIR.glob(f"{batch_id}_CF*.mp4")))
+    if not has_cam2:
+        has_cam2 = bool(list(RECORDINGS_DIR.glob(f"{batch_id}_CS*.bag")) or list(RECORDINGS_DIR.glob(f"{batch_id}_CS*.mp4")))
 
     if not has_cam1 and not has_cam2:
         return {"success": False, "message": "No camera files found"}
@@ -1772,16 +1893,16 @@ def list_all_files():
              if not meta_path.exists():
                  meta_path = RECORDINGS_DIR / f"{batch_id}_camera2_metadata.json"
 
-        batch["patient_name"] = ""
         batch["patient_id"] = ""
         batch["recorded_at"] = ""
+        batch["note"] = ""
 
         if meta_path.exists():
             try:
                 meta = json.loads(meta_path.read_text())
-                batch["patient_name"] = meta.get("patient_name", "")
                 batch["patient_id"] = meta.get("patient_id", "")
                 batch["recorded_at"] = meta.get("recorded_at", "")
+                batch["note"] = meta.get("note", "")
             except Exception:
                 pass
 
@@ -1804,7 +1925,13 @@ def list_all_files():
             "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat()
         })
     result["jsons"].sort(key=lambda x: x["modified"], reverse=True)
-
+    
+    # Enrich CSVs and JSONs with metadata parsed from filename or sidecars
+    # This is done on the fly since these are just file lists
+    # Format: {timestamp}_{CF|CS}_{patient}_{note}_tagging.csv
+    # Or just return raw name and let frontend parse?
+    # For now, just raw list.
+    
     return result
 
 
@@ -1963,3 +2090,11 @@ def view_json(filename: str):
         return {"success": True, "filename": filename, "content": content}
     except Exception as e:
         return {"error": str(e)}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    # Allow running directly with python api/main.py
+    # Binds to 0.0.0.0 to allow external access
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
