@@ -6,7 +6,7 @@
 <link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="Processing Pipeline (YOLOv8)" href="processing.html"><link rel="prev" title="Configuration" href="config.html">
 
     <!-- Generated with Sphinx 8.1.3 and Furo 2025.12.19 -->
-        <title>Conversion Pipeline - Parkinson Analysis 1.0.0 documentation</title>
+        <title>Conversion Pipeline - Parkinson Analysis 2.0.0 documentation</title>
       <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
@@ -161,7 +161,7 @@
       </label>
     </div>
     <div class="header-center">
-      <a href="../index.html"><div class="brand">Parkinson Analysis 1.0.0 documentation</div></a>
+      <a href="../index.html"><div class="brand">Parkinson Analysis 2.0.0 documentation</div></a>
     </div>
     <div class="header-right">
       <div class="theme-toggle-container theme-toggle-header">
@@ -182,7 +182,7 @@
       
       <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
   
-  <span class="sidebar-brand-text">Parkinson Analysis 1.0.0 documentation</span>
+  <span class="sidebar-brand-text">Parkinson Analysis 2.0.0 documentation</span>
   
 </a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
   <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
@@ -250,19 +250,29 @@
 This is a post recording step since we dont want FFmpeg competing for CPU during capture.</p>
 <section id="how-it-works">
 <h2>How it works<a class="headerlink" href="#how-it-works" title="Link to this heading">¶</a></h2>
-<ol class="arabic simple">
+<ol class="arabic">
 <li><p>BAG file is replayed through pyrealsense2 in non realtime mode (fast as disk IO)</p></li>
 <li><p>Color frames are extracted as BGR24 numpy arrays</p></li>
 <li><p>Frames are piped to FFmpeg stdin as raw video</p></li>
-<li><p>FFmpeg encodes them. Tries <code class="docutils literal notranslate"><span class="pre">h264_nvenc</span></code> first (Jetson NVENC hardware encoder)
-then falls back to <code class="docutils literal notranslate"><span class="pre">libx264</span></code> (CPU) if NVENC isnt available</p></li>
+<li><p>FFmpeg (or GStreamer on Jetson) encodes them. Encoder priority:</p>
+<ol class="loweralpha simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">nvv4l2h264enc</span></code> — Jetson GStreamer hardware encoder (piped through <code class="docutils literal notranslate"><span class="pre">gst-launch-1.0</span></code>)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">h264_nvenc</span></code> — Desktop NVIDIA NVENC hardware encoder (via FFmpeg)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">libx264</span></code> — CPU software fallback (via FFmpeg)</p></li>
+</ol>
+<p>The pipeline tries each encoder in order and falls back to the next if unavailable</p>
+</li>
 <li><p>Output written to <code class="docutils literal notranslate"><span class="pre">&lt;name&gt;.mp4.converting</span></code> temp file</p></li>
 <li><p>Frame count validated: MP4 must have &gt;= 95% of BAG frames</p></li>
 <li><p>If validation passes temp file renamed to <code class="docutils literal notranslate"><span class="pre">.mp4</span></code>, otherwise deleted and next encoder tried</p></li>
 <li><p>Metadata sidecar updated with MP4 filename, frame count and conversion timestamp</p></li>
 </ol>
-<p>Both cameras of a batch convert in parallel threads. Batches are sequential (one at a time).</p>
+<p>Both cameras of a batch convert in parallel threads. Batches are sequential (one at a time).
+The pipeline recognises both legacy naming (<code class="docutils literal notranslate"><span class="pre">_camera1</span></code>/<code class="docutils literal notranslate"><span class="pre">_camera2</span></code>) and the current
+convention (<code class="docutils literal notranslate"><span class="pre">_CF</span></code>/<code class="docutils literal notranslate"><span class="pre">_CS</span></code>).</p>
 <p>Job lifecycle: <code class="docutils literal notranslate"><span class="pre">pending</span> <span class="pre">-&gt;</span> <span class="pre">converting</span> <span class="pre">-&gt;</span> <span class="pre">done</span> <span class="pre">|</span> <span class="pre">failed</span> <span class="pre">|</span> <span class="pre">cancelled</span></code></p>
+<p>After a successful conversion the metadata sidecar is updated with the MP4 filename, frame
+count, real FPS, expected versus dropped frames, and conversion duration.</p>
 </section>
 <section id="safety">
 <h2>Safety<a class="headerlink" href="#safety" title="Link to this heading">¶</a></h2>
@@ -406,7 +416,7 @@ the /conversion/start API route.</p>
       
     </aside>
   </div>
-</div><script src="../_static/documentation_options.js?v=8d563738"></script>
+</div><script src="../_static/documentation_options.js?v=51b770b3"></script>
     <script src="../_static/doctools.js?v=9bcbadda"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/scripts/furo.js?v=46bd48cc"></script>

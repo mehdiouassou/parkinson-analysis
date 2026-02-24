@@ -7,8 +7,8 @@ Supports RealSense camera backends:
     - Live RealSense (realsense/auto) - desktop/laptop with RealSense cameras
 
 Camera Priority:
-    - Camera 0 (CAM1/Front) is always the first detected RealSense device
-    - Camera 1 (CAM2/Side) is the second detected RealSense device
+    - Camera 0 (CAM1/Front/Frontale) is always the first detected RealSense device
+    - Camera 1 (CAM2/Side/Sagittale) is the second detected RealSense device
 """
 
 import numpy as np
@@ -46,7 +46,7 @@ class CameraSource:
     Unified camera source wrapping the RealSense backend.
 
     Attributes:
-        camera_id: Camera index (0 for Front/Sagittale, 1 for Side/Frontale)
+        camera_id: Camera index (0 for Front/Frontale, 1 for Side/Sagittale)
         mode: Camera backend mode (from CAMERA_MODE)
         camera_type: Detected camera type (realsense or bag_file)
         frame_size: Current frame dimensions (width, height)

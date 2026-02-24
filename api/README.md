@@ -18,19 +18,20 @@ FastAPI backend for the dual camera recording and processing system. Handles cam
 
 1. User clicks Record, backend sets status to `warming_up`
 2. 3 second warmup for auto exposure stabilization
-3. Both cameras start BAG recording in parallel threads (minimizes start offset)
-4. `time.monotonic()` timestamps captured around each pipeline restart for sync tracking
-5. MJPEG preview stream throttled to 15fps during recording to save CPU
-6. On Stop both cameras stop in parallel, metadata sidecars written with sync data
-7. Pause/Resume uses the RealSense SDK recorder pause/resume (real pause, not fake)
+3. Phase 1 (PREPARE): both cameras stop old pipelines and build new recording-enabled configs in parallel (~1-3s, concurrent)
+4. Phase 2 (COMMIT): both cameras wait at a `threading.Barrier` then call `pipeline.start()` simultaneously (~100-300ms)
+5. `time.monotonic()` timestamps captured around each commit + hardware timestamps tracked per frame
+6. MJPEG preview stream throttled to 10fps during recording to save CPU
+7. On Stop both cameras stop in parallel, BAG files renamed with CF/CS labels, metadata sidecars written with sync data and hardware timestamps
+8. Pause/Resume uses the RealSense SDK recorder pause/resume (real pause, not fake)
 
 ## How streaming works
 
-Background capture threads continuously read frames from the RealSense pipeline. The MJPEG generator reads the latest frame, JPEG encodes it and yields it. FPS is throttled to 30fps idle, 15fps during recording.
+Background capture threads continuously read frames from the RealSense pipeline. The MJPEG generator reads the latest frame, JPEG encodes it and yields it. FPS is throttled to 30fps idle, 10fps during recording.
 
 ## How conversion works
 
-BAG files are replayed at max speed (non realtime) and frames are piped to FFmpeg as raw BGR24. Tries h264_nvenc first (Jetson NVENC hardware encoder), falls back to libx264. Writes to a `.mp4.converting` temp file, validates frame count (>=95% of BAG), renames on success.
+BAG files are replayed at max speed (non realtime) and frames are piped to an encoder as raw video. Encoder priority: nvv4l2h264enc (Jetson GStreamer hardware) -> h264_nvenc (Desktop NVENC) -> libx264 (CPU fallback). Writes to a `.mp4.converting` temp file, validates frame count (>=95% of BAG), renames on success.
 
 ## How processing works
 
@@ -38,7 +39,7 @@ YOLOv8 pose inference on BAG or MP4 files. Extracts 17 COCO keypoints per frame,
 
 ## Setup
 
-Python 3.8+ (Jetson) or 3.12+ (Desktop).
+Python 3.10 or 3.11 (Desktop) or 3.8 (Jetson with JetPack 5). Python 3.12+ is not supported due to pinned dependency versions (e.g. ``numpy==1.23.5``).
 
 ```bash
 pip install -r ../requirements/base.txt
@@ -74,3 +75,11 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 | `processed/` | JSON reports from YOLOv8 analysis |
 
 All directories are auto created on startup.
+
+## File naming convention
+
+Files follow the pattern `{timestamp}_{CF|CS}_{patient_id}_{note}.ext`:
+- **CF** = Camera Frontale (front view, camera 1)
+- **CS** = Camera Sagittale (side view, camera 2)
+
+Legacy recordings using `_camera1`/`_camera2` naming are still recognised by all routes.

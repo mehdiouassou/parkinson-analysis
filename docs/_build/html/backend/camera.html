@@ -6,7 +6,7 @@
 <link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="Configuration" href="config.html"><link rel="prev" title="Main Application (FastAPI)" href="main.html">
 
     <!-- Generated with Sphinx 8.1.3 and Furo 2025.12.19 -->
-        <title>Camera Interface - Parkinson Analysis 1.0.0 documentation</title>
+        <title>Camera Interface - Parkinson Analysis 2.0.0 documentation</title>
       <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
@@ -161,7 +161,7 @@
       </label>
     </div>
     <div class="header-center">
-      <a href="../index.html"><div class="brand">Parkinson Analysis 1.0.0 documentation</div></a>
+      <a href="../index.html"><div class="brand">Parkinson Analysis 2.0.0 documentation</div></a>
     </div>
     <div class="header-right">
       <div class="theme-toggle-container theme-toggle-header">
@@ -182,7 +182,7 @@
       
       <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
   
-  <span class="sidebar-brand-text">Parkinson Analysis 1.0.0 documentation</span>
+  <span class="sidebar-brand-text">Parkinson Analysis 2.0.0 documentation</span>
   
 </a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
   <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
@@ -267,8 +267,19 @@ written to the BAG file.</p>
 </section>
 <section id="global-management">
 <h2>Global management<a class="headerlink" href="#global-management" title="Link to this heading">¶</a></h2>
-<p><code class="docutils literal notranslate"><span class="pre">get_camera_source(camera_id)</span></code> lazily creates and starts cameras in background threads.
+<p><code class="docutils literal notranslate"><span class="pre">get_camera_source(camera_id)</span></code> is a pure getter that returns an existing <code class="docutils literal notranslate"><span class="pre">CameraSource</span></code>
+or creates an uninitialised placeholder. It never starts or restarts cameras.
+Camera lifecycle is managed by <code class="docutils literal notranslate"><span class="pre">startup_all_cameras()</span></code> (called once on server boot)
+and <code class="docutils literal notranslate"><span class="pre">restart_all_cameras()</span></code> (explicit user action via <code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/cameras/restart</span></code>).
 <code class="docutils literal notranslate"><span class="pre">shutdown_all_cameras()</span></code> stops everything cleanly on app shutdown.</p>
+<p>Recording uses a two-phase barrier synchronisation protocol. <code class="docutils literal notranslate"><span class="pre">prepare_recording()</span></code> stops
+the old pipeline and builds a new config with recording enabled (slow, ~1–3 s per camera,
+runs in parallel). <code class="docutils literal notranslate"><span class="pre">commit_recording()</span></code> waits at a <code class="docutils literal notranslate"><span class="pre">threading.Barrier</span></code> so all cameras
+call <code class="docutils literal notranslate"><span class="pre">pipeline.start()</span></code> simultaneously (fast, ~100–300 ms). This reduces the
+inter-camera start offset from ~2 s (sequential) to &lt; 100 ms.</p>
+<p>During recording, hardware timestamps (<code class="docutils literal notranslate"><span class="pre">color_frame.get_timestamp()</span></code>) are tracked for
+post-hoc synchronisation analysis. The first and last timestamps, timestamp domain, and
+frame count are stored in the metadata sidecar at recording stop.</p>
 </section>
 <section id="module-camera">
 <span id="api-reference"></span><h2>API reference<a class="headerlink" href="#module-camera" title="Link to this heading">¶</a></h2>
@@ -281,8 +292,8 @@ written to the BAG file.</p>
 </ul>
 </dd>
 <dt>Camera Priority:</dt><dd><ul class="simple">
-<li><p>Camera 0 (CAM1/Front) is always the first detected RealSense device</p></li>
-<li><p>Camera 1 (CAM2/Side) is the second detected RealSense device</p></li>
+<li><p>Camera 0 (CAM1/Front/Frontale) is always the first detected RealSense device</p></li>
+<li><p>Camera 1 (CAM2/Side/Sagittale) is the second detected RealSense device</p></li>
 </ul>
 </dd>
 </dl>
@@ -294,7 +305,7 @@ written to the BAG file.</p>
 <dl class="py attribute">
 <dt class="sig sig-object py" id="camera.CameraSource.camera_id">
 <span class="sig-name descname"><span class="pre">camera_id</span></span><a class="headerlink" href="#camera.CameraSource.camera_id" title="Link to this definition">¶</a></dt>
-<dd><p>Camera index (0 for Front/Sagittale, 1 for Side/Frontale)</p>
+<dd><p>Camera index (0 for Front/Frontale, 1 for Side/Sagittale)</p>
 </dd></dl>
 
 <dl class="py attribute">
@@ -328,15 +339,56 @@ written to the BAG file.</p>
 </dd></dl>
 
 <dl class="py method">
+<dt class="sig sig-object py" id="camera.CameraSource.commit_recording">
+<span class="sig-name descname"><span class="pre">commit_recording</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">prepared</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="reference internal" href="../_modules/camera.html#CameraSource.commit_recording"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#camera.CameraSource.commit_recording" title="Link to this definition">¶</a></dt>
+<dd><p>Phase 2 of synchronized recording start (FAST — ~100-300ms).</p>
+<p>Takes the prepared (pipeline, config) from prepare_recording()
+and starts the pipeline. This is the part that should be
+synchronized across cameras via a threading.Barrier.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>prepared</strong> – Tuple of (pipeline, config, bag_path) from prepare_recording()</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if recording started successfully</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="camera.CameraSource.get_first_hw_timestamp">
+<span class="sig-name descname"><span class="pre">get_first_hw_timestamp</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/camera.html#CameraSource.get_first_hw_timestamp"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#camera.CameraSource.get_first_hw_timestamp" title="Link to this definition">¶</a></dt>
+<dd><p>Get the hardware timestamp of the first frame captured during recording.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="camera.CameraSource.get_hw_timestamp_domain">
+<span class="sig-name descname"><span class="pre">get_hw_timestamp_domain</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/camera.html#CameraSource.get_hw_timestamp_domain"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#camera.CameraSource.get_hw_timestamp_domain" title="Link to this definition">¶</a></dt>
+<dd><p>Get the timestamp domain (e.g. ‘hardware_clock’, ‘system_time’).</p>
+</dd></dl>
+
+<dl class="py method">
 <dt class="sig sig-object py" id="camera.CameraSource.get_info">
 <span class="sig-name descname"><span class="pre">get_info</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span></span></span><a class="reference internal" href="../_modules/camera.html#CameraSource.get_info"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#camera.CameraSource.get_info" title="Link to this definition">¶</a></dt>
 <dd><p>Get camera information.</p>
 </dd></dl>
 
 <dl class="py method">
+<dt class="sig sig-object py" id="camera.CameraSource.get_last_hw_timestamp">
+<span class="sig-name descname"><span class="pre">get_last_hw_timestamp</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/camera.html#CameraSource.get_last_hw_timestamp"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#camera.CameraSource.get_last_hw_timestamp" title="Link to this definition">¶</a></dt>
+<dd><p>Get the hardware timestamp of the last frame captured during recording.</p>
+</dd></dl>
+
+<dl class="py method">
 <dt class="sig sig-object py" id="camera.CameraSource.get_pipeline">
 <span class="sig-name descname"><span class="pre">get_pipeline</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/camera.html#CameraSource.get_pipeline"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#camera.CameraSource.get_pipeline" title="Link to this definition">¶</a></dt>
 <dd><p>Get the RealSense pipeline.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="camera.CameraSource.get_recording_frame_count">
+<span class="sig-name descname"><span class="pre">get_recording_frame_count</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span></span></span><a class="reference internal" href="../_modules/camera.html#CameraSource.get_recording_frame_count"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#camera.CameraSource.get_recording_frame_count" title="Link to this definition">¶</a></dt>
+<dd><p>Get the number of frames captured during the current/last recording.</p>
 </dd></dl>
 
 <dl class="py method">
@@ -367,6 +419,25 @@ continue writing.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Returns<span class="colon">:</span></dt>
 <dd class="field-odd"><p>True if pause was successful</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="camera.CameraSource.prepare_recording">
+<span class="sig-name descname"><span class="pre">prepare_recording</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bag_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">object</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/camera.html#CameraSource.prepare_recording"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#camera.CameraSource.prepare_recording" title="Link to this definition">¶</a></dt>
+<dd><p>Phase 1 of synchronized recording start (SLOW — ~1-3s).</p>
+<p>Stops the current streaming pipeline and builds a new rs.config
+with recording enabled, but does NOT start the new pipeline yet.
+Call commit_recording() afterwards to actually start recording.</p>
+<p>This separation allows multiple cameras to prepare independently
+and then start simultaneously via a threading.Barrier.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>bag_path</strong> – Path to .bag file to record to</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Prepared (pipeline, config) tuple, or None on failure</p>
 </dd>
 </dl>
 </dd></dl>
@@ -406,8 +477,9 @@ continue writing.</p>
 <dt class="sig sig-object py" id="camera.CameraSource.start_recording">
 <span class="sig-name descname"><span class="pre">start_recording</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bag_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="reference internal" href="../_modules/camera.html#CameraSource.start_recording"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#camera.CameraSource.start_recording" title="Link to this definition">¶</a></dt>
 <dd><p>Start BAG recording by restarting pipeline with recording enabled.</p>
-<p>Stops the current streaming pipeline and restarts it with recording
-enabled. The same pipeline handles both streaming and recording.</p>
+<p>Legacy single-step API: combines prepare + commit.
+For synchronized multi-camera recording, use prepare_recording()
+followed by commit_recording() with a threading.Barrier.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><p><strong>bag_path</strong> – Path to .bag file to record to</p>
@@ -440,16 +512,30 @@ enabled. The same pipeline handles both streaming and recording.</p>
 <dl class="py function">
 <dt class="sig sig-object py" id="camera.get_camera_source">
 <span class="sig-prename descclassname"><span class="pre">camera.</span></span><span class="sig-name descname"><span class="pre">get_camera_source</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">camera_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#camera.CameraSource" title="camera.CameraSource"><span class="pre">CameraSource</span></a></span></span><a class="reference internal" href="../_modules/camera.html#get_camera_source"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#camera.get_camera_source" title="Link to this definition">¶</a></dt>
-<dd><p>Get or create camera source for given ID.</p>
-<p>Camera startup is launched in a background thread so this function
-returns immediately without blocking the calling request. Callers
-must check <code class="docutils literal notranslate"><span class="pre">camera.is_running()</span></code> before using the source.</p>
+<dd><p>Get camera source for given ID.</p>
+<p>Pure getter — never starts or restarts cameras.  Camera lifecycle
+is managed by startup_all_cameras() (on boot) and
+restart_all_cameras() (explicit user action).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="camera.restart_all_cameras">
+<span class="sig-prename descclassname"><span class="pre">camera.</span></span><span class="sig-name descname"><span class="pre">restart_all_cameras</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/camera.html#restart_all_cameras"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#camera.restart_all_cameras" title="Link to this definition">¶</a></dt>
+<dd><p>Hard restart: stop all → USB settle → re-detect → restart.</p>
+<p>This is the “nuclear option” triggered ONLY by explicit user click
+on the Restart button.  NOT called during page navigation.</p>
 </dd></dl>
 
 <dl class="py function">
 <dt class="sig sig-object py" id="camera.shutdown_all_cameras">
 <span class="sig-prename descclassname"><span class="pre">camera.</span></span><span class="sig-name descname"><span class="pre">shutdown_all_cameras</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/camera.html#shutdown_all_cameras"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#camera.shutdown_all_cameras" title="Link to this definition">¶</a></dt>
-<dd><p>Release all camera resources. Called on app shutdown.</p>
+<dd><p>Release all camera resources. Called on app shutdown only.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="camera.startup_all_cameras">
+<span class="sig-prename descclassname"><span class="pre">camera.</span></span><span class="sig-name descname"><span class="pre">startup_all_cameras</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/camera.html#startup_all_cameras"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#camera.startup_all_cameras" title="Link to this definition">¶</a></dt>
+<dd><p>Start all detected cameras.  Called once on server boot.</p>
 </dd></dl>
 
 </section>
@@ -521,12 +607,18 @@ must check <code class="docutils literal notranslate"><span class="pre">camera.i
 <li><a class="reference internal" href="#camera.CameraSource.frame_size"><code class="docutils literal notranslate"><span class="pre">CameraSource.frame_size</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.fps"><code class="docutils literal notranslate"><span class="pre">CameraSource.fps</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.realsense_serial"><code class="docutils literal notranslate"><span class="pre">CameraSource.realsense_serial</span></code></a></li>
+<li><a class="reference internal" href="#camera.CameraSource.commit_recording"><code class="docutils literal notranslate"><span class="pre">CameraSource.commit_recording()</span></code></a></li>
+<li><a class="reference internal" href="#camera.CameraSource.get_first_hw_timestamp"><code class="docutils literal notranslate"><span class="pre">CameraSource.get_first_hw_timestamp()</span></code></a></li>
+<li><a class="reference internal" href="#camera.CameraSource.get_hw_timestamp_domain"><code class="docutils literal notranslate"><span class="pre">CameraSource.get_hw_timestamp_domain()</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.get_info"><code class="docutils literal notranslate"><span class="pre">CameraSource.get_info()</span></code></a></li>
+<li><a class="reference internal" href="#camera.CameraSource.get_last_hw_timestamp"><code class="docutils literal notranslate"><span class="pre">CameraSource.get_last_hw_timestamp()</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.get_pipeline"><code class="docutils literal notranslate"><span class="pre">CameraSource.get_pipeline()</span></code></a></li>
+<li><a class="reference internal" href="#camera.CameraSource.get_recording_frame_count"><code class="docutils literal notranslate"><span class="pre">CameraSource.get_recording_frame_count()</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.is_realsense"><code class="docutils literal notranslate"><span class="pre">CameraSource.is_realsense()</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.is_recording"><code class="docutils literal notranslate"><span class="pre">CameraSource.is_recording()</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.is_running"><code class="docutils literal notranslate"><span class="pre">CameraSource.is_running()</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.pause_recording"><code class="docutils literal notranslate"><span class="pre">CameraSource.pause_recording()</span></code></a></li>
+<li><a class="reference internal" href="#camera.CameraSource.prepare_recording"><code class="docutils literal notranslate"><span class="pre">CameraSource.prepare_recording()</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.read"><code class="docutils literal notranslate"><span class="pre">CameraSource.read()</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.resume_recording"><code class="docutils literal notranslate"><span class="pre">CameraSource.resume_recording()</span></code></a></li>
 <li><a class="reference internal" href="#camera.CameraSource.start"><code class="docutils literal notranslate"><span class="pre">CameraSource.start()</span></code></a></li>
@@ -536,7 +628,9 @@ must check <code class="docutils literal notranslate"><span class="pre">camera.i
 </ul>
 </li>
 <li><a class="reference internal" href="#camera.get_camera_source"><code class="docutils literal notranslate"><span class="pre">get_camera_source()</span></code></a></li>
+<li><a class="reference internal" href="#camera.restart_all_cameras"><code class="docutils literal notranslate"><span class="pre">restart_all_cameras()</span></code></a></li>
 <li><a class="reference internal" href="#camera.shutdown_all_cameras"><code class="docutils literal notranslate"><span class="pre">shutdown_all_cameras()</span></code></a></li>
+<li><a class="reference internal" href="#camera.startup_all_cameras"><code class="docutils literal notranslate"><span class="pre">startup_all_cameras()</span></code></a></li>
 </ul>
 </li>
 </ul>
@@ -550,7 +644,7 @@ must check <code class="docutils literal notranslate"><span class="pre">camera.i
       
     </aside>
   </div>
-</div><script src="../_static/documentation_options.js?v=8d563738"></script>
+</div><script src="../_static/documentation_options.js?v=51b770b3"></script>
     <script src="../_static/doctools.js?v=9bcbadda"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/scripts/furo.js?v=46bd48cc"></script>

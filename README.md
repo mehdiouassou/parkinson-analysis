@@ -28,12 +28,14 @@ The whole thing is a FastAPI backend that talks to a React frontend over REST. T
 ```
 User clicks Record
     -> 3s warmup (auto exposure stabilization)
-    -> both cameras start BAG recording in parallel threads
+    -> Phase 1 (PREPARE): both cameras stop old pipelines and build new configs in PARALLEL (~1-3s)
+    -> Phase 2 (COMMIT):  both cameras wait at a threading.Barrier then start simultaneously (~100-300ms)
     -> RealSense SDK handles frame capture to .bag (zero drop, SDK managed)
-    -> MJPEG preview stream continues at 15fps (throttled during recording)
+    -> MJPEG preview stream continues at 10fps (throttled during recording)
     -> User clicks Stop
     -> both cameras stop in parallel threads
-    -> metadata sidecars written with patient info + sync data
+    -> BAG files renamed with CF/CS + patient_id + note
+    -> metadata sidecars written with patient info, sync data, and hardware timestamps
 ```
 
 The key thing here is that the BAG recording is handled entirely by the RealSense SDK. We dont manually grab frames and write them. The SDK records directly to the .bag file from the camera pipeline which means zero frame drops at the source. The preview stream runs separately at a lower FPS to save CPU.
@@ -44,12 +46,14 @@ This is one of the trickier parts. We have two D455 cameras each on their own US
 
 What we do instead:
 
-1. Both cameras start recording in parallel threads to minimize the start time offset
-2. We capture `time.monotonic()` timestamps right before and after each cameras pipeline restart
-3. The inter camera offset (how many ms apart they actually started) gets stored in the metadata sidecar
-4. The quality analysis page shows this offset and uses it in the sync score
+1. Both cameras **prepare** in parallel threads — each stops its old pipeline and builds a new recording-enabled config (slow, ~1-3s per camera, runs concurrently)
+2. Both cameras wait at a `threading.Barrier` then **commit** — calling `pipeline.start()` simultaneously (fast, ~100-300ms)
+3. We capture `time.monotonic()` timestamps around each cameras commit to measure the actual inter-camera start offset
+4. Hardware timestamps from the RealSense sensor (`color_frame.get_timestamp()`) are also tracked for post-hoc alignment
+5. The inter camera offset and hardware timestamps get stored in the metadata sidecar
+6. The quality analysis page shows this offset and uses it in the sync score
 
-With parallel thread startup the offset is typically under 500ms, sometimes under 100ms. Not perfect but good enough for clinical gait analysis where movements happen over seconds not milliseconds.
+With barrier-synchronized startup the offset is typically under 100ms. Not perfect but good enough for clinical gait analysis where movements happen over seconds not milliseconds.
 
 The pause/resume system uses the RealSense SDK recorder device pause/resume so the BAG file doesnt contain dead frames during pauses. Both cameras pause and resume together.
 
@@ -57,7 +61,7 @@ The pause/resume system uses the RealSense SDK recorder device pause/resume so t
 
 The MJPEG preview stream is FPS throttled:
 - **30 fps** when idle (smooth preview)
-- **15 fps** during recording (saves CPU and USB bandwidth for the BAG recording)
+- **10 fps** during recording (saves CPU and USB bandwidth for the BAG recording)
 
 Each camera has a background capture thread that continuously grabs frames from the RealSense pipeline. The streaming generator reads the latest frame from that thread, JPEG encodes it and sends it. This decouples capture rate from stream rate.
 
@@ -68,7 +72,7 @@ Select batch on Conversion page
     -> both cameras convert in parallel threads
     -> BAG replayed at max speed (non realtime, fast as disk IO allows)
     -> frames piped to FFmpeg stdin as raw BGR24
-    -> encoder priority: h264_nvenc (Jetson NVENC) -> libx264 (CPU fallback)
+    -> encoder priority: nvv4l2h264enc (Jetson GStreamer) -> h264_nvenc (Desktop NVENC) -> libx264 (CPU fallback)
     -> output written to .mp4.converting temp file
     -> frame count validated (must be >= 95% of BAG frames)
     -> temp file renamed to .mp4 on success, deleted on failure
@@ -213,16 +217,18 @@ For Jetson/remote set `REMOTE_MODE=true` and `API_HOST=0.0.0.0`.
 
 ## Recording Output
 
-Each session writes to `api/recordings/`:
+Each session writes to `api/recordings/`. Files follow the naming convention `{timestamp}_{CF|CS}_{patient_id}_{note}.ext` where CF = Camera Frontale (front) and CS = Camera Sagittale (side):
 
 | File | What it is |
 |---|---|
-| `<timestamp>_camera1.bag` | RealSense depth + RGB, Front camera |
-| `<timestamp>_camera2.bag` | RealSense depth + RGB, Side camera |
-| `<timestamp>_camera1.mp4` | Converted RGB video (created by Conversion page) |
-| `<timestamp>_camera1_metadata.json` | Patient info, FPS, sync data, conversion info |
+| `<timestamp>_CF_<patient>_<note>.bag` | RealSense depth + RGB, Front camera |
+| `<timestamp>_CS_<patient>_<note>.bag` | RealSense depth + RGB, Side camera |
+| `<timestamp>_CF_<patient>_<note>.mp4` | Converted RGB video (created by Conversion page) |
+| `<timestamp>_CF_<patient>_<note>_metadata.json` | Patient info, FPS, sync data, conversion info |
 
-Camera 1 = Front/Frontale, Camera 2 = Side/Sagittale.
+Camera 1 = Front/Frontale (CF), Camera 2 = Side/Sagittale (CS).
+
+Legacy recordings using the old naming convention (`_camera1`/`_camera2`) are still recognised by all backend routes.
 
 If only one camera is connected only that cameras files get written (orphan mode). The swap button on the recording page flips which physical device is camera 1.
 
@@ -256,7 +262,7 @@ Two D455 cameras at 848x480@60fps with both color and depth streams is pushing i
 
 ### Streaming during recording
 
-The MJPEG preview stream shares USB bandwidth with BAG recording. Thats why we throttle it to 15fps during recording. If you still see issues you could disable streaming entirely during recording but that means no live preview.
+The MJPEG preview stream shares USB bandwidth with BAG recording. Thats why we throttle it to 10fps during recording. If you still see issues you could disable streaming entirely during recording but that means no live preview.
 
 ### Pipeline restart on record start/stop
 
@@ -284,7 +290,7 @@ Output goes to `docs/_build/html/`. Swagger UI is at `http://localhost:8000/docs
 
 - Dont commit `.engine` files or `venv/` directories
 - Dont run `pip install` on Jetson unless using the requirements file
-- If cameras are plugged in after the server starts call `POST /cameras/refresh`
+- If cameras are plugged in after the server starts call `POST /cameras/restart`
 
 ## Author
 

@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.abspath('../api'))
 project = 'Parkinson Analysis'
 copyright = '2026, Mehdi Ouassou'
 author = 'Mehdi Ouassou'
-release = '1.0.0'
+release = '2.0.0'
 
 extensions = [
     'sphinx.ext.autodoc',

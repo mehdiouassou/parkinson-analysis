@@ -5,7 +5,7 @@
     <meta name="color-scheme" content="light dark"><link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html">
 
     <!-- Generated with Sphinx 8.1.3 and Furo 2025.12.19 -->
-        <title>conversion - Parkinson Analysis 1.0.0 documentation</title>
+        <title>conversion - Parkinson Analysis 2.0.0 documentation</title>
       <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
@@ -160,7 +160,7 @@
       </label>
     </div>
     <div class="header-center">
-      <a href="../index.html"><div class="brand">Parkinson Analysis 1.0.0 documentation</div></a>
+      <a href="../index.html"><div class="brand">Parkinson Analysis 2.0.0 documentation</div></a>
     </div>
     <div class="header-right">
       <div class="theme-toggle-container theme-toggle-header">
@@ -181,7 +181,7 @@
       
       <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
   
-  <span class="sidebar-brand-text">Parkinson Analysis 1.0.0 documentation</span>
+  <span class="sidebar-brand-text">Parkinson Analysis 2.0.0 documentation</span>
   
 </a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
   <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
@@ -377,7 +377,11 @@
 <span class="c1"># =============================================================================</span>
 
 <span class="k">def</span><span class="w"> </span><span class="nf">_get_ffmpeg_path</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return path to FFmpeg binary or None if not available.&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return path to FFmpeg binary prioritizing the system ffmpeg.&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">shutil</span>
+    <span class="n">sys_ffmpeg</span> <span class="o">=</span> <span class="n">shutil</span><span class="o">.</span><span class="n">which</span><span class="p">(</span><span class="s2">&quot;ffmpeg&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">sys_ffmpeg</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">sys_ffmpeg</span>
     <span class="k">if</span> <span class="ow">not</span> <span class="n">FFMPEG_AVAILABLE</span> <span class="ow">or</span> <span class="n">imageio_ffmpeg</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
         <span class="k">return</span> <span class="kc">None</span>
     <span class="k">try</span><span class="p">:</span>
@@ -386,16 +390,18 @@
         <span class="k">return</span> <span class="kc">None</span>
 
 
-<span class="k">def</span><span class="w"> </span><span class="nf">_count_bag_frames</span><span class="p">(</span><span class="n">bag_path</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_count_bag_frames</span><span class="p">(</span><span class="n">bag_path</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Count color frames in a BAG by replaying at non-realtime speed.</span>
-<span class="sd">    Fast pass — does not decode pixel data; just counts framesets.</span>
-<span class="sd">    Returns 0 on error.</span>
+<span class="sd">    Also extracts first and last frame timestamps to calculate exact duration.</span>
+<span class="sd">    Returns a dict with total_frames, first_ts, and last_ts.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">if</span> <span class="ow">not</span> <span class="n">REALSENSE_AVAILABLE</span> <span class="ow">or</span> <span class="n">rs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="k">return</span> <span class="mi">0</span>
+        <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;total_frames&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;first_ts&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;last_ts&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">}</span>
 
     <span class="n">frame_count</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">first_ts</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">last_ts</span> <span class="o">=</span> <span class="kc">None</span>
     <span class="n">pipeline</span> <span class="o">=</span> <span class="n">rs</span><span class="o">.</span><span class="n">pipeline</span><span class="p">()</span>
     <span class="k">try</span><span class="p">:</span>
         <span class="n">config</span> <span class="o">=</span> <span class="n">rs</span><span class="o">.</span><span class="n">config</span><span class="p">()</span>
@@ -408,7 +414,12 @@
         <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
             <span class="k">try</span><span class="p">:</span>
                 <span class="n">frames</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">wait_for_frames</span><span class="p">(</span><span class="n">timeout_ms</span><span class="o">=</span><span class="mi">2000</span><span class="p">)</span>
-                <span class="k">if</span> <span class="n">frames</span><span class="o">.</span><span class="n">get_color_frame</span><span class="p">():</span>
+                <span class="n">color_frame</span> <span class="o">=</span> <span class="n">frames</span><span class="o">.</span><span class="n">get_color_frame</span><span class="p">()</span>
+                <span class="k">if</span> <span class="n">color_frame</span><span class="p">:</span>
+                    <span class="n">ts</span> <span class="o">=</span> <span class="n">color_frame</span><span class="o">.</span><span class="n">get_timestamp</span><span class="p">()</span>
+                    <span class="k">if</span> <span class="n">first_ts</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="n">first_ts</span> <span class="o">=</span> <span class="n">ts</span>
+                    <span class="n">last_ts</span> <span class="o">=</span> <span class="n">ts</span>
                     <span class="n">frame_count</span> <span class="o">+=</span> <span class="mi">1</span>
             <span class="k">except</span> <span class="ne">RuntimeError</span><span class="p">:</span>
                 <span class="k">break</span>  <span class="c1"># End of file</span>
@@ -420,7 +431,7 @@
         <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
             <span class="k">pass</span>
 
-    <span class="k">return</span> <span class="n">frame_count</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;total_frames&quot;</span><span class="p">:</span> <span class="n">frame_count</span><span class="p">,</span> <span class="s2">&quot;first_ts&quot;</span><span class="p">:</span> <span class="n">first_ts</span><span class="p">,</span> <span class="s2">&quot;last_ts&quot;</span><span class="p">:</span> <span class="n">last_ts</span><span class="p">}</span>
 
 
 <span class="k">def</span><span class="w"> </span><span class="nf">_update_metadata_sidecar</span><span class="p">(</span>
@@ -428,7 +439,6 @@
     <span class="n">mp4_file</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
     <span class="n">mp4_frames</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
     <span class="o">*</span><span class="p">,</span>
-    <span class="n">patient_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
     <span class="n">patient_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
     <span class="n">camera_view</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
     <span class="n">camera_type</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">CAMERA_TYPE_REALSENSE</span><span class="p">,</span>
@@ -436,6 +446,7 @@
     <span class="n">camera_mode</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
     <span class="n">recorded_at</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
     <span class="n">bag_file</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+    <span class="n">extra_data</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 <span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Update (or create) the metadata sidecar JSON after successful conversion.</span>
@@ -455,7 +466,6 @@
     <span class="n">meta</span><span class="p">[</span><span class="s2">&quot;converted_at&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">isoformat</span><span class="p">()</span>
 
     <span class="c1"># Fill in any fields missing from an older sidecar (or brand-new file)</span>
-    <span class="n">meta</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="s2">&quot;patient_name&quot;</span><span class="p">,</span> <span class="n">patient_name</span><span class="p">)</span>
     <span class="n">meta</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="s2">&quot;patient_id&quot;</span><span class="p">,</span> <span class="n">patient_id</span><span class="p">)</span>
     <span class="n">meta</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="s2">&quot;camera_view&quot;</span><span class="p">,</span> <span class="n">camera_view</span><span class="p">)</span>
     <span class="n">meta</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="s2">&quot;camera_type&quot;</span><span class="p">,</span> <span class="n">camera_type</span><span class="p">)</span>
@@ -463,6 +473,9 @@
     <span class="n">meta</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="s2">&quot;camera_mode&quot;</span><span class="p">,</span> <span class="n">camera_mode</span><span class="p">)</span>
     <span class="n">meta</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="s2">&quot;recorded_at&quot;</span><span class="p">,</span> <span class="n">recorded_at</span><span class="p">)</span>
     <span class="n">meta</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="s2">&quot;bag_file&quot;</span><span class="p">,</span> <span class="n">bag_file</span> <span class="ow">or</span> <span class="n">meta_path</span><span class="o">.</span><span class="n">stem</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;_metadata&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;.bag&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">extra_data</span><span class="p">:</span>
+        <span class="n">meta</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">extra_data</span><span class="p">)</span>
 
     <span class="n">meta_path</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">meta</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
     <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Conversion] Metadata updated: </span><span class="si">{</span><span class="n">meta_path</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
@@ -480,11 +493,25 @@
 <span class="sd">    Tries h264_nvenc first (Jetson NVENC), falls back to libx264.</span>
 <span class="sd">    Updates conversion_jobs[job_id] in-place.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
     <span class="n">cam_key</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;camera</span><span class="si">{</span><span class="n">cam_num</span><span class="si">}</span><span class="s2">&quot;</span>
+    
+    <span class="c1"># Try exact match first</span>
     <span class="n">bag_path</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">batch_id</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">cam_key</span><span class="si">}</span><span class="s2">.bag&quot;</span>
-    <span class="n">mp4_path</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">batch_id</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">cam_key</span><span class="si">}</span><span class="s2">.mp4&quot;</span>
-    <span class="n">temp_path</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">batch_id</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">cam_key</span><span class="si">}</span><span class="s2">.mp4.converting&quot;</span>
-    <span class="n">meta_path</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">batch_id</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">cam_key</span><span class="si">}</span><span class="s2">_metadata.json&quot;</span>
+    
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">bag_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="c1"># Try finding new style: cam_num 1 -&gt; CF, cam_num 2 -&gt; CS</span>
+        <span class="n">suffix</span> <span class="o">=</span> <span class="s2">&quot;CF&quot;</span> <span class="k">if</span> <span class="n">cam_num</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">&quot;CS&quot;</span>
+        <span class="c1"># Search for pattern {batch_id}_{suffix}*.bag</span>
+        <span class="n">candidates</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">RECORDINGS_DIR</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">batch_id</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">suffix</span><span class="si">}</span><span class="s2">*.bag&quot;</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">candidates</span><span class="p">:</span>
+            <span class="n">bag_path</span> <span class="o">=</span> <span class="n">candidates</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Conversion] Found renamed bag for </span><span class="si">{</span><span class="n">cam_key</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">bag_path</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">base_name</span> <span class="o">=</span> <span class="n">bag_path</span><span class="o">.</span><span class="n">stem</span>
+    <span class="n">mp4_path</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">base_name</span><span class="si">}</span><span class="s2">.mp4&quot;</span>
+    <span class="n">temp_path</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">base_name</span><span class="si">}</span><span class="s2">.mp4.converting&quot;</span>
+    <span class="n">meta_path</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">base_name</span><span class="si">}</span><span class="s2">_metadata.json&quot;</span>
 
     <span class="c1"># ---- Helpers ----</span>
 
@@ -531,7 +558,7 @@
 
     <span class="n">fps</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">DEFAULT_FPS</span>
     <span class="n">camera_view</span> <span class="o">=</span> <span class="s2">&quot;Front&quot;</span> <span class="k">if</span> <span class="n">cam_num</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">&quot;Side&quot;</span>
-    <span class="n">patient_name</span> <span class="o">=</span> <span class="n">patient_id</span> <span class="o">=</span> <span class="n">camera_mode</span> <span class="o">=</span> <span class="n">recorded_at</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">patient_id</span> <span class="o">=</span> <span class="n">camera_mode</span> <span class="o">=</span> <span class="n">recorded_at</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
     <span class="n">camera_type</span> <span class="o">=</span> <span class="n">CAMERA_TYPE_REALSENSE</span>
 
     <span class="k">if</span> <span class="n">meta_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
@@ -539,7 +566,6 @@
             <span class="n">meta</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">meta_path</span><span class="o">.</span><span class="n">read_text</span><span class="p">())</span>
             <span class="n">fps</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;fps&quot;</span><span class="p">,</span> <span class="n">DEFAULT_FPS</span><span class="p">))</span>
             <span class="n">camera_view</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;camera_view&quot;</span><span class="p">,</span> <span class="n">camera_view</span><span class="p">)</span>
-            <span class="n">patient_name</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;patient_name&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
             <span class="n">patient_id</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;patient_id&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
             <span class="n">camera_type</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;camera_type&quot;</span><span class="p">,</span> <span class="n">camera_type</span><span class="p">)</span>
             <span class="n">camera_mode</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;camera_mode&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
@@ -551,24 +577,46 @@
 
     <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Conversion] </span><span class="si">{</span><span class="n">cam_key</span><span class="si">}</span><span class="s2">: Counting BAG frames...&quot;</span><span class="p">)</span>
     <span class="n">_update</span><span class="p">({</span><span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="s2">&quot;converting&quot;</span><span class="p">,</span> <span class="s2">&quot;progress&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">})</span>
-    <span class="n">total_frames</span> <span class="o">=</span> <span class="n">_count_bag_frames</span><span class="p">(</span><span class="n">bag_path</span><span class="p">)</span>
-    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Conversion] </span><span class="si">{</span><span class="n">cam_key</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">total_frames</span><span class="si">}</span><span class="s2"> frames in BAG&quot;</span><span class="p">)</span>
+    <span class="n">bag_stats</span> <span class="o">=</span> <span class="n">_count_bag_frames</span><span class="p">(</span><span class="n">bag_path</span><span class="p">)</span>
+    <span class="n">total_frames</span> <span class="o">=</span> <span class="n">bag_stats</span><span class="p">[</span><span class="s2">&quot;total_frames&quot;</span><span class="p">]</span>
+    <span class="n">first_ts</span> <span class="o">=</span> <span class="n">bag_stats</span><span class="p">[</span><span class="s2">&quot;first_ts&quot;</span><span class="p">]</span>
+    <span class="n">last_ts</span> <span class="o">=</span> <span class="n">bag_stats</span><span class="p">[</span><span class="s2">&quot;last_ts&quot;</span><span class="p">]</span>
+
+    <span class="n">real_fps</span> <span class="o">=</span> <span class="n">fps</span>
+    <span class="n">expected_frames</span> <span class="o">=</span> <span class="n">total_frames</span>
+    <span class="n">dropped_frames</span> <span class="o">=</span> <span class="mi">0</span>
+
+    <span class="k">if</span> <span class="n">first_ts</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">last_ts</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">total_frames</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="n">duration_sec</span> <span class="o">=</span> <span class="p">(</span><span class="n">last_ts</span> <span class="o">-</span> <span class="n">first_ts</span><span class="p">)</span> <span class="o">/</span> <span class="mf">1000.0</span>
+        <span class="k">if</span> <span class="n">duration_sec</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">real_fps</span> <span class="o">=</span> <span class="n">total_frames</span> <span class="o">/</span> <span class="n">duration_sec</span>
+            <span class="n">expected_frames</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="nb">round</span><span class="p">(</span><span class="n">duration_sec</span> <span class="o">*</span> <span class="n">fps</span><span class="p">))</span>
+            <span class="n">dropped_frames</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">expected_frames</span> <span class="o">-</span> <span class="n">total_frames</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Conversion] </span><span class="si">{</span><span class="n">cam_key</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">total_frames</span><span class="si">}</span><span class="s2"> frames in </span><span class="si">{</span><span class="n">duration_sec</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">s &quot;</span>
+                  <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">real_fps</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> FPS). Expected: </span><span class="si">{</span><span class="n">expected_frames</span><span class="si">}</span><span class="s2">, Dropped: </span><span class="si">{</span><span class="n">dropped_frames</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Conversion] </span><span class="si">{</span><span class="n">cam_key</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">total_frames</span><span class="si">}</span><span class="s2"> frames in BAG&quot;</span><span class="p">)</span>
+
     <span class="n">_update</span><span class="p">({</span><span class="s2">&quot;total_frames&quot;</span><span class="p">:</span> <span class="n">total_frames</span><span class="p">})</span>
 
     <span class="k">if</span> <span class="n">_is_cancelled</span><span class="p">():</span>
         <span class="n">_update</span><span class="p">({</span><span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="s2">&quot;cancelled&quot;</span><span class="p">})</span>
         <span class="k">return</span>
 
-    <span class="c1"># ---- Encoder loop — try NVENC first, then libx264 ----</span>
+    <span class="c1"># ---- Encoder loop — try Jetson NVENC, then desktop NVENC, then libx264 ----</span>
 
     <span class="n">encoder_configs</span> <span class="o">=</span> <span class="p">[</span>
         <span class="p">(</span>
-            <span class="s2">&quot;h264_nvenc&quot;</span><span class="p">,</span>
-            <span class="p">[</span><span class="s2">&quot;-c:v&quot;</span><span class="p">,</span> <span class="s2">&quot;h264_nvenc&quot;</span><span class="p">,</span> <span class="s2">&quot;-preset&quot;</span><span class="p">,</span> <span class="s2">&quot;p4&quot;</span><span class="p">,</span> <span class="s2">&quot;-cq&quot;</span><span class="p">,</span> <span class="s2">&quot;23&quot;</span><span class="p">,</span> <span class="s2">&quot;-pix_fmt&quot;</span><span class="p">,</span> <span class="s2">&quot;yuv420p&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;nvv4l2h264enc&quot;</span><span class="p">,</span>  <span class="c1"># Jetson GStreamer hardware acceleration (H.264)</span>
+            <span class="p">[],</span>
         <span class="p">),</span>
         <span class="p">(</span>
-            <span class="s2">&quot;libx264&quot;</span><span class="p">,</span>
-            <span class="p">[</span><span class="s2">&quot;-c:v&quot;</span><span class="p">,</span> <span class="s2">&quot;libx264&quot;</span><span class="p">,</span> <span class="s2">&quot;-preset&quot;</span><span class="p">,</span> <span class="s2">&quot;fast&quot;</span><span class="p">,</span> <span class="s2">&quot;-crf&quot;</span><span class="p">,</span> <span class="s2">&quot;23&quot;</span><span class="p">,</span> <span class="s2">&quot;-pix_fmt&quot;</span><span class="p">,</span> <span class="s2">&quot;yuv420p&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;h264_nvenc&quot;</span><span class="p">,</span>     <span class="c1"># Desktop NVIDIA NVENC hardware acceleration (H.264)</span>
+            <span class="p">[</span><span class="s2">&quot;-c:v&quot;</span><span class="p">,</span> <span class="s2">&quot;h264_nvenc&quot;</span><span class="p">,</span> <span class="s2">&quot;-preset&quot;</span><span class="p">,</span> <span class="s2">&quot;p4&quot;</span><span class="p">,</span> <span class="s2">&quot;-tune&quot;</span><span class="p">,</span> <span class="s2">&quot;ll&quot;</span><span class="p">,</span> <span class="s2">&quot;-b:v&quot;</span><span class="p">,</span> <span class="s2">&quot;4M&quot;</span><span class="p">,</span> <span class="s2">&quot;-pix_fmt&quot;</span><span class="p">,</span> <span class="s2">&quot;yuv420p&quot;</span><span class="p">],</span>
+        <span class="p">),</span>
+        <span class="p">(</span>
+            <span class="s2">&quot;libx264&quot;</span><span class="p">,</span>        <span class="c1"># FFmpeg software fallback (H.264)</span>
+            <span class="p">[</span><span class="s2">&quot;-c:v&quot;</span><span class="p">,</span> <span class="s2">&quot;libx264&quot;</span><span class="p">,</span> <span class="s2">&quot;-preset&quot;</span><span class="p">,</span> <span class="s2">&quot;ultrafast&quot;</span><span class="p">,</span> <span class="s2">&quot;-crf&quot;</span><span class="p">,</span> <span class="s2">&quot;28&quot;</span><span class="p">,</span> <span class="s2">&quot;-pix_fmt&quot;</span><span class="p">,</span> <span class="s2">&quot;yuv420p&quot;</span><span class="p">],</span>
         <span class="p">),</span>
     <span class="p">]</span>
 
@@ -607,20 +655,38 @@
             <span class="n">actual_h</span> <span class="o">=</span> <span class="n">stream_profile</span><span class="o">.</span><span class="n">height</span><span class="p">()</span>
             <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Conversion] </span><span class="si">{</span><span class="n">cam_key</span><span class="si">}</span><span class="s2">: BAG stream </span><span class="si">{</span><span class="n">actual_w</span><span class="si">}</span><span class="s2">x</span><span class="si">{</span><span class="n">actual_h</span><span class="si">}</span><span class="s2"> @ </span><span class="si">{</span><span class="n">actual_fps</span><span class="si">}</span><span class="s2">fps&quot;</span><span class="p">)</span>
 
-            <span class="n">ffmpeg_cmd</span> <span class="o">=</span> <span class="p">[</span>
-                <span class="n">ffmpeg_path</span><span class="p">,</span> <span class="s2">&quot;-y&quot;</span><span class="p">,</span>
-                <span class="s2">&quot;-f&quot;</span><span class="p">,</span> <span class="s2">&quot;rawvideo&quot;</span><span class="p">,</span> <span class="s2">&quot;-vcodec&quot;</span><span class="p">,</span> <span class="s2">&quot;rawvideo&quot;</span><span class="p">,</span>
-                <span class="s2">&quot;-s&quot;</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">actual_w</span><span class="si">}</span><span class="s2">x</span><span class="si">{</span><span class="n">actual_h</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
-                <span class="s2">&quot;-pix_fmt&quot;</span><span class="p">,</span> <span class="s2">&quot;bgr24&quot;</span><span class="p">,</span>
-                <span class="s2">&quot;-r&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">actual_fps</span><span class="p">)),</span>
-                <span class="s2">&quot;-i&quot;</span><span class="p">,</span> <span class="s2">&quot;pipe:0&quot;</span><span class="p">,</span>
-                <span class="o">*</span><span class="n">encode_args</span><span class="p">,</span>
-                <span class="s2">&quot;-movflags&quot;</span><span class="p">,</span> <span class="s2">&quot;+faststart&quot;</span><span class="p">,</span>
-                <span class="s2">&quot;-f&quot;</span><span class="p">,</span> <span class="s2">&quot;mp4&quot;</span><span class="p">,</span>
-                <span class="nb">str</span><span class="p">(</span><span class="n">temp_path</span><span class="p">),</span>
-            <span class="p">]</span>
+            <span class="k">if</span> <span class="n">encoder_name</span> <span class="o">==</span> <span class="s2">&quot;nvv4l2h264enc&quot;</span><span class="p">:</span>
+                <span class="kn">import</span><span class="w"> </span><span class="nn">shutil</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">shutil</span><span class="o">.</span><span class="n">which</span><span class="p">(</span><span class="s2">&quot;gst-launch-1.0&quot;</span><span class="p">):</span>
+                    <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s2">&quot;gst-launch-1.0 not found in PATH&quot;</span><span class="p">)</span>
+                
+                <span class="n">cmd</span> <span class="o">=</span> <span class="p">[</span>
+                    <span class="s2">&quot;gst-launch-1.0&quot;</span><span class="p">,</span> <span class="s2">&quot;-q&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;fdsrc&quot;</span><span class="p">,</span> <span class="s2">&quot;fd=0&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;!&quot;</span><span class="p">,</span> <span class="s2">&quot;videoparse&quot;</span><span class="p">,</span> <span class="s2">&quot;format=bgr&quot;</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;width=</span><span class="si">{</span><span class="n">actual_w</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;height=</span><span class="si">{</span><span class="n">actual_h</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;framerate=</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">actual_fps</span><span class="p">)</span><span class="si">}</span><span class="s2">/1&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;!&quot;</span><span class="p">,</span> <span class="s2">&quot;videoconvert&quot;</span><span class="p">,</span> <span class="s2">&quot;!&quot;</span><span class="p">,</span> <span class="s2">&quot;video/x-raw,format=I420&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;!&quot;</span><span class="p">,</span> <span class="s2">&quot;nvvidconv&quot;</span><span class="p">,</span> <span class="s2">&quot;!&quot;</span><span class="p">,</span> <span class="s2">&quot;video/x-raw(memory:NVMM)&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;!&quot;</span><span class="p">,</span> <span class="s2">&quot;nvv4l2h264enc&quot;</span><span class="p">,</span> <span class="s2">&quot;maxperf-enable=1&quot;</span><span class="p">,</span> <span class="s2">&quot;bitrate=4000000&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;!&quot;</span><span class="p">,</span> <span class="s2">&quot;h264parse&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;!&quot;</span><span class="p">,</span> <span class="s2">&quot;mp4mux&quot;</span><span class="p">,</span> <span class="s2">&quot;faststart=true&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;!&quot;</span><span class="p">,</span> <span class="s2">&quot;filesink&quot;</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;location=</span><span class="si">{</span><span class="n">temp_path</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="p">]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">cmd</span> <span class="o">=</span> <span class="p">[</span>
+                    <span class="n">ffmpeg_path</span><span class="p">,</span> <span class="s2">&quot;-y&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;-f&quot;</span><span class="p">,</span> <span class="s2">&quot;rawvideo&quot;</span><span class="p">,</span> <span class="s2">&quot;-vcodec&quot;</span><span class="p">,</span> <span class="s2">&quot;rawvideo&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;-s&quot;</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">actual_w</span><span class="si">}</span><span class="s2">x</span><span class="si">{</span><span class="n">actual_h</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;-pix_fmt&quot;</span><span class="p">,</span> <span class="s2">&quot;bgr24&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;-r&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">actual_fps</span><span class="p">)),</span>
+                    <span class="s2">&quot;-i&quot;</span><span class="p">,</span> <span class="s2">&quot;pipe:0&quot;</span><span class="p">,</span>
+                    <span class="o">*</span><span class="n">encode_args</span><span class="p">,</span>
+                    <span class="s2">&quot;-movflags&quot;</span><span class="p">,</span> <span class="s2">&quot;+faststart&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;-f&quot;</span><span class="p">,</span> <span class="s2">&quot;mp4&quot;</span><span class="p">,</span>
+                    <span class="nb">str</span><span class="p">(</span><span class="n">temp_path</span><span class="p">),</span>
+                <span class="p">]</span>
+
             <span class="n">ffmpeg_proc</span> <span class="o">=</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">Popen</span><span class="p">(</span>
-                <span class="n">ffmpeg_cmd</span><span class="p">,</span>
+                <span class="n">cmd</span><span class="p">,</span>
                 <span class="n">stdin</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">PIPE</span><span class="p">,</span>
                 <span class="n">stdout</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">DEVNULL</span><span class="p">,</span>
                 <span class="n">stderr</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">PIPE</span><span class="p">,</span>
@@ -659,11 +725,13 @@
             <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
                 <span class="k">pass</span>
             <span class="k">if</span> <span class="n">ffmpeg_proc</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">ffmpeg_stderr</span> <span class="o">=</span> <span class="sa">b</span><span class="s2">&quot;&quot;</span>
                 <span class="k">try</span><span class="p">:</span>
-                    <span class="n">ffmpeg_proc</span><span class="o">.</span><span class="n">stdin</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
-                <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
-                    <span class="k">pass</span>
-                <span class="n">_</span><span class="p">,</span> <span class="n">ffmpeg_stderr</span> <span class="o">=</span> <span class="n">ffmpeg_proc</span><span class="o">.</span><span class="n">communicate</span><span class="p">()</span>
+                    <span class="c1"># Let communicate handle stdin.close() natively to avoid &quot;flush of closed file&quot;</span>
+                    <span class="n">_</span><span class="p">,</span> <span class="n">ffmpeg_stderr</span> <span class="o">=</span> <span class="n">ffmpeg_proc</span><span class="o">.</span><span class="n">communicate</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
+                <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Conversion] </span><span class="si">{</span><span class="n">cam_key</span><span class="si">}</span><span class="s2">: Error communicating with FFmpeg: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    
                 <span class="k">if</span> <span class="ow">not</span> <span class="n">bag_read_ok</span> <span class="ow">and</span> <span class="n">ffmpeg_stderr</span><span class="p">:</span>
                     <span class="nb">print</span><span class="p">(</span>
                         <span class="sa">f</span><span class="s2">&quot;[Conversion] </span><span class="si">{</span><span class="n">cam_key</span><span class="si">}</span><span class="s2">: FFmpeg stderr (</span><span class="si">{</span><span class="n">encoder_name</span><span class="si">}</span><span class="s2">): &quot;</span>
@@ -729,19 +797,27 @@
             <span class="s2">&quot;output_size_mb&quot;</span><span class="p">:</span> <span class="n">output_size_mb</span><span class="p">,</span>
         <span class="p">})</span>
 
+        <span class="n">duration</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+
         <span class="n">_update_metadata_sidecar</span><span class="p">(</span>
             <span class="n">meta_path</span><span class="p">,</span> <span class="n">mp4_path</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">mp4_frames</span><span class="p">,</span>
-            <span class="n">patient_name</span><span class="o">=</span><span class="n">patient_name</span><span class="p">,</span> <span class="n">patient_id</span><span class="o">=</span><span class="n">patient_id</span><span class="p">,</span>
+            <span class="n">patient_id</span><span class="o">=</span><span class="n">patient_id</span><span class="p">,</span>
             <span class="n">camera_view</span><span class="o">=</span><span class="n">camera_view</span><span class="p">,</span> <span class="n">camera_type</span><span class="o">=</span><span class="n">camera_type</span><span class="p">,</span>
-            <span class="n">fps</span><span class="o">=</span><span class="n">fps</span><span class="p">,</span> <span class="n">camera_mode</span><span class="o">=</span><span class="n">camera_mode</span><span class="p">,</span> <span class="n">recorded_at</span><span class="o">=</span><span class="n">recorded_at</span><span class="p">,</span>
+            <span class="n">fps</span><span class="o">=</span><span class="n">actual_fps</span><span class="p">,</span> <span class="n">camera_mode</span><span class="o">=</span><span class="n">camera_mode</span><span class="p">,</span> <span class="n">recorded_at</span><span class="o">=</span><span class="n">recorded_at</span><span class="p">,</span>
             <span class="n">bag_file</span><span class="o">=</span><span class="n">bag_path</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
+            <span class="n">extra_data</span><span class="o">=</span><span class="p">{</span>
+                <span class="s2">&quot;real_fps&quot;</span><span class="p">:</span> <span class="n">real_fps</span><span class="p">,</span>
+                <span class="s2">&quot;expected_frames&quot;</span><span class="p">:</span> <span class="n">expected_frames</span><span class="p">,</span>
+                <span class="s2">&quot;dropped_frames&quot;</span><span class="p">:</span> <span class="n">dropped_frames</span><span class="p">,</span>
+                <span class="s2">&quot;conversion_duration_s&quot;</span><span class="p">:</span> <span class="n">duration</span>
+            <span class="p">}</span>
         <span class="p">)</span>
         <span class="k">return</span>  <span class="c1"># Done</span>
 
     <span class="c1"># All encoders failed</span>
     <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Conversion] </span><span class="si">{</span><span class="n">cam_key</span><span class="si">}</span><span class="s2">: All encoders failed&quot;</span><span class="p">)</span>
     <span class="n">_cleanup_temp</span><span class="p">()</span>
-    <span class="n">_update</span><span class="p">({</span><span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="s2">&quot;failed&quot;</span><span class="p">,</span> <span class="s2">&quot;error&quot;</span><span class="p">:</span> <span class="s2">&quot;All encoders failed (h264_nvenc, libx264)&quot;</span><span class="p">})</span>
+    <span class="n">_update</span><span class="p">({</span><span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="s2">&quot;failed&quot;</span><span class="p">,</span> <span class="s2">&quot;error&quot;</span><span class="p">:</span> <span class="s2">&quot;All encoders failed (nvv4l2h264enc, libx264)&quot;</span><span class="p">})</span>
 
 
 <span class="c1"># =============================================================================</span>
@@ -836,7 +912,7 @@
       
     </aside>
   </div>
-</div><script src="../_static/documentation_options.js?v=8d563738"></script>
+</div><script src="../_static/documentation_options.js?v=51b770b3"></script>
     <script src="../_static/doctools.js?v=9bcbadda"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/scripts/furo.js?v=46bd48cc"></script>

@@ -5,7 +5,7 @@
     <meta name="color-scheme" content="light dark"><link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html">
 
     <!-- Generated with Sphinx 8.1.3 and Furo 2025.12.19 -->
-        <title>config - Parkinson Analysis 1.0.0 documentation</title>
+        <title>config - Parkinson Analysis 2.0.0 documentation</title>
       <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
@@ -160,7 +160,7 @@
       </label>
     </div>
     <div class="header-center">
-      <a href="../index.html"><div class="brand">Parkinson Analysis 1.0.0 documentation</div></a>
+      <a href="../index.html"><div class="brand">Parkinson Analysis 2.0.0 documentation</div></a>
     </div>
     <div class="header-right">
       <div class="theme-toggle-container theme-toggle-header">
@@ -181,7 +181,7 @@
       
       <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
   
-  <span class="sidebar-brand-text">Parkinson Analysis 1.0.0 documentation</span>
+  <span class="sidebar-brand-text">Parkinson Analysis 2.0.0 documentation</span>
   
 </a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
   <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
@@ -254,16 +254,17 @@
 <span class="sd">    API_HOST: Host for API (default localhost, use 0.0.0.0 for remote)</span>
 
 <span class="sd">Camera Type Priority:</span>
-<span class="sd">    - Camera 0 (CAM1/Front) is the first detected RealSense device</span>
-<span class="sd">    - Camera 1 (CAM2/Side) is the second detected RealSense device</span>
+<span class="sd">    - Camera 0 (CAM1/Front/Frontale) is the first detected RealSense device</span>
+<span class="sd">    - Camera 1 (CAM2/Side/Sagittale) is the second detected RealSense device</span>
 
 <span class="sd">Recording Behavior:</span>
-<span class="sd">    - RealSense cameras: .bag (depth + RGB) + .mp4 (RGB preview)</span>
-<span class="sd">    - Viewing/Tagging always uses .mp4 stream</span>
-<span class="sd">    - Processing uses .bag (RealSense depth + RGB)</span>
+<span class="sd">    - RealSense cameras record .bag (depth + RGB) only — zero-drop, SDK-managed</span>
+<span class="sd">    - .mp4 files are generated post-recording via the Conversion pipeline</span>
+<span class="sd">    - Viewing/Tagging uses .mp4 files; Processing prefers .bag for depth data</span>
 <span class="sd">&quot;&quot;&quot;</span>
 
 <span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">threading</span>
 
@@ -292,8 +293,8 @@
 
 <span class="c1"># Path to sample .bag files for mock_bag mode (download from Intel)</span>
 <span class="n">BAG_FILES</span> <span class="o">=</span> <span class="p">{</span>
-    <span class="mi">0</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;BAG_FILE_CAM1&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span>  <span class="c1"># Camera 1: Front/Sagittale</span>
-    <span class="mi">1</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;BAG_FILE_CAM2&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span>  <span class="c1"># Camera 2: Side/Frontale</span>
+    <span class="mi">0</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;BAG_FILE_CAM1&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span>  <span class="c1"># Camera 1: Front/Frontale</span>
+    <span class="mi">1</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;BAG_FILE_CAM2&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span>  <span class="c1"># Camera 2: Side/Sagittale</span>
 <span class="p">}</span>
 
 <span class="c1"># Camera type constants</span>
@@ -364,20 +365,16 @@
 
     <span class="n">devices</span> <span class="o">=</span> <span class="p">[]</span>
     <span class="k">try</span><span class="p">:</span>
-        <span class="c1"># Create context and query immediately - no retries, no waits.</span>
-        <span class="c1"># If the device is there, this is instant. If not, it returns empty.</span>
         <span class="n">ctx</span> <span class="o">=</span> <span class="n">rs</span><span class="o">.</span><span class="n">context</span><span class="p">()</span>
         <span class="n">device_list</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">ctx</span><span class="o">.</span><span class="n">query_devices</span><span class="p">())</span>
 
         <span class="k">for</span> <span class="n">dev</span> <span class="ow">in</span> <span class="n">device_list</span><span class="p">:</span>
             <span class="k">try</span><span class="p">:</span>
                 <span class="n">serial</span> <span class="o">=</span> <span class="n">dev</span><span class="o">.</span><span class="n">get_info</span><span class="p">(</span><span class="n">rs</span><span class="o">.</span><span class="n">camera_info</span><span class="o">.</span><span class="n">serial_number</span><span class="p">)</span>
-                <span class="c1"># Deduplicate by serial</span>
                 <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">d</span><span class="p">[</span><span class="s2">&quot;serial&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">serial</span> <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">devices</span><span class="p">):</span>
                     <span class="k">continue</span>
                     
                 <span class="n">name</span> <span class="o">=</span> <span class="n">dev</span><span class="o">.</span><span class="n">get_info</span><span class="p">(</span><span class="n">rs</span><span class="o">.</span><span class="n">camera_info</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
-                <span class="c1"># Check USB type (USB2 vs USB3 connection)</span>
                 <span class="n">usb_type</span> <span class="o">=</span> <span class="s2">&quot;unknown&quot;</span>
                 <span class="k">if</span> <span class="n">dev</span><span class="o">.</span><span class="n">supports</span><span class="p">(</span><span class="n">rs</span><span class="o">.</span><span class="n">camera_info</span><span class="o">.</span><span class="n">usb_type_descriptor</span><span class="p">):</span>
                     <span class="n">usb_type</span> <span class="o">=</span> <span class="n">dev</span><span class="o">.</span><span class="n">get_info</span><span class="p">(</span><span class="n">rs</span><span class="o">.</span><span class="n">camera_info</span><span class="o">.</span><span class="n">usb_type_descriptor</span><span class="p">)</span>
@@ -401,6 +398,7 @@
 <span class="c1"># Detected devices cache (populated on first access)</span>
 <span class="n">_detected_realsense</span> <span class="o">=</span> <span class="kc">None</span>
 <span class="n">_realsense_count</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="n">_detection_lock</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span>  <span class="c1"># Prevents concurrent USB enumeration</span>
 
 
 <div class="viewcode-block" id="get_realsense_count">
@@ -427,8 +425,8 @@
 <span class="sd">            1: {&quot;type&quot;: &quot;realsense&quot;, &quot;serial&quot;: &quot;...&quot;, &quot;name&quot;: &quot;...&quot;}</span>
 <span class="sd">        }</span>
 
-<span class="sd">    Camera 0 = Front/Sagittale (first detected device)</span>
-<span class="sd">    Camera 1 = Side/Frontale  (second detected device)</span>
+<span class="sd">    Camera 0 = Front/Frontale  (first detected device)</span>
+<span class="sd">    Camera 1 = Side/Sagittale (second detected device)</span>
 <span class="sd">    &quot;&quot;&quot;</span>
 
     <span class="k">global</span> <span class="n">_detected_realsense</span><span class="p">,</span> <span class="n">_realsense_count</span>
@@ -460,7 +458,7 @@
 <span class="sd">    Get the type of camera at given logical ID.</span>
 
 <span class="sd">    Args:</span>
-<span class="sd">        camera_id: Camera index (0 = Front/Sagittale, 1 = Side/Frontale)</span>
+<span class="sd">        camera_id: Camera index (0 = Front/Frontale, 1 = Side/Sagittale)</span>
 
 <span class="sd">    Returns:</span>
 <span class="sd">        Camera type constant: CAMERA_TYPE_REALSENSE or CAMERA_TYPE_BAG_FILE</span>
@@ -481,15 +479,50 @@
 <div class="viewcode-block" id="refresh_camera_detection">
 <a class="viewcode-back" href="../backend/config.html#config.refresh_camera_detection">[docs]</a>
 <span class="k">def</span><span class="w"> </span><span class="nf">refresh_camera_detection</span><span class="p">():</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;Force re-detection of cameras. Call when cameras may have changed.&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Force re-detection of cameras.</span>
+
+<span class="sd">    Thread-safe: uses _detection_lock to guarantee only one thread</span>
+<span class="sd">    enumerates USB devices at a time.  Includes a USB settle delay</span>
+<span class="sd">    and retry loop because RealSense cameras need time after</span>
+<span class="sd">    pipeline.stop() before they can be re-enumerated.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">global</span> <span class="n">_detected_realsense</span><span class="p">,</span> <span class="n">_realsense_count</span>
-    
-    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[Config] Refreshing camera detection...&quot;</span><span class="p">)</span>
-    <span class="n">new_devices</span> <span class="o">=</span> <span class="n">detect_realsense_devices</span><span class="p">()</span>
-    
-    <span class="n">_detected_realsense</span> <span class="o">=</span> <span class="n">new_devices</span>
-    <span class="n">_realsense_count</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">new_devices</span><span class="p">)</span>
-    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[Config] Camera detection refreshed&quot;</span><span class="p">)</span></div>
+
+    <span class="c1"># Only one thread may run detection at a time.  If another thread</span>
+    <span class="c1"># is already running, skip — the results will be updated by the</span>
+    <span class="c1"># thread that acquired the lock.</span>
+    <span class="n">acquired</span> <span class="o">=</span> <span class="n">_detection_lock</span><span class="o">.</span><span class="n">acquire</span><span class="p">(</span><span class="n">blocking</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">acquired</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[Config] Detection already in progress, skipping&quot;</span><span class="p">)</span>
+        <span class="k">return</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[Config] Refreshing camera detection...&quot;</span><span class="p">)</span>
+
+        <span class="c1"># USB settle — cameras need time after pipeline.stop()</span>
+        <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">3.0</span><span class="p">)</span>
+
+        <span class="n">previous_count</span> <span class="o">=</span> <span class="n">_realsense_count</span> <span class="ow">or</span> <span class="mi">2</span>  <span class="c1"># assume 2 if never detected</span>
+        <span class="n">max_retries</span> <span class="o">=</span> <span class="mi">4</span>
+
+        <span class="k">for</span> <span class="n">attempt</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">max_retries</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+            <span class="n">new_devices</span> <span class="o">=</span> <span class="n">detect_realsense_devices</span><span class="p">()</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">new_devices</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="n">previous_count</span> <span class="ow">or</span> <span class="nb">len</span><span class="p">(</span><span class="n">new_devices</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">2</span><span class="p">:</span>
+                <span class="n">_detected_realsense</span> <span class="o">=</span> <span class="n">new_devices</span>
+                <span class="n">_realsense_count</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">new_devices</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Config] Detection success: </span><span class="si">{</span><span class="n">_realsense_count</span><span class="si">}</span><span class="s2"> camera(s)&quot;</span><span class="p">)</span>
+                <span class="k">return</span>
+            <span class="k">if</span> <span class="n">attempt</span> <span class="o">&lt;</span> <span class="n">max_retries</span><span class="p">:</span>
+                <span class="n">wait</span> <span class="o">=</span> <span class="mf">2.0</span> <span class="o">*</span> <span class="n">attempt</span>  <span class="c1"># 2s, 4s, 6s</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Config] Found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">new_devices</span><span class="p">)</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">previous_count</span><span class="si">}</span><span class="s2"> camera(s), &quot;</span>
+                      <span class="sa">f</span><span class="s2">&quot;retry in </span><span class="si">{</span><span class="n">wait</span><span class="si">}</span><span class="s2">s (</span><span class="si">{</span><span class="n">attempt</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">max_retries</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+                <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">wait</span><span class="p">)</span>
+
+        <span class="n">_detected_realsense</span> <span class="o">=</span> <span class="n">new_devices</span>
+        <span class="n">_realsense_count</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">new_devices</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Config] Detection finished after retries: </span><span class="si">{</span><span class="n">_realsense_count</span><span class="si">}</span><span class="s2"> camera(s)&quot;</span><span class="p">)</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">_detection_lock</span><span class="o">.</span><span class="n">release</span><span class="p">()</span></div>
 
 
 
@@ -554,7 +587,7 @@
       
     </aside>
   </div>
-</div><script src="../_static/documentation_options.js?v=8d563738"></script>
+</div><script src="../_static/documentation_options.js?v=51b770b3"></script>
     <script src="../_static/doctools.js?v=9bcbadda"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/scripts/furo.js?v=46bd48cc"></script>

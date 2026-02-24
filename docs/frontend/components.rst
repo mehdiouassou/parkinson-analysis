@@ -36,7 +36,7 @@ Layout
 
    Application shell with sidebar navigation.
 
-   - Links to CameraFeeds, Tagging, Processing, FileManager
+   - Links to CameraFeeds, Conversion, Tagging, Processing, FileManager
    - Dark mode toggle — persists to ``localStorage``
 
 ErrorBoundary

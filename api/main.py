@@ -21,10 +21,11 @@ Recording Behavior:
     RealSense cameras:
         - .bag file (depth + RGB) only — zero-drop, SDK-managed
         - .mp4 is generated post-recording via the Conversion page
+        - MJPEG preview throttled to 10fps during recording
 
 Camera Priority:
-    Camera 0 (CAM1/Front)  is the first detected RealSense device.
-    Camera 1 (CAM2/Side)   is the second detected RealSense device.
+    Camera 0 (CAM1/Front/Frontale)   is the first detected RealSense device.
+    Camera 1 (CAM2/Side/Sagittale)   is the second detected RealSense device.
     If only one camera is connected, only camera1 files are recorded.
 """
 
@@ -163,8 +164,8 @@ def get_physical_camera_id(logical_id: int) -> int:
     When SWAP_CAMERAS is True:  swap mapping  (0->1, 1->0).
 
     Logical IDs determine file naming:
-        Logical 0 → camera1 files (Front/Sagittale)
-        Logical 1 → camera2 files (Side/Frontale)
+        Logical 0 → camera1 files (Front/Frontale)
+        Logical 1 → camera2 files (Side/Sagittale)
     """
     if SWAP_CAMERAS:
         return 1 - logical_id
@@ -918,8 +919,8 @@ def swap_cameras():
     When swapped, /camera/0 streams from physical device 1 and vice-versa.
     Recordings are always saved with logical naming:
 
-    - camera1 = Front/Sagittale  (logical 0)
-    - camera2 = Side/Frontale    (logical 1)
+    - camera1 = Front/Frontale   (logical 0)
+    - camera2 = Side/Sagittale   (logical 1)
     """
     global SWAP_CAMERAS
     SWAP_CAMERAS = not SWAP_CAMERAS

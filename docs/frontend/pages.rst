@@ -56,8 +56,8 @@ CameraFeeds
 
    .. js:function:: handleRefresh()
 
-      Calls ``POST /cameras/refresh`` to re detect cameras after plug/unplug.
-      Disabled during active recording (would kill the streams).
+      Calls ``POST /cameras/restart`` to hard-restart all cameras (stop, USB settle,
+      re-detect, start). Disabled during active recording (would kill the streams).
 
    **Camera feeds**
 
@@ -65,7 +65,7 @@ CameraFeeds
    On error it retries with exponential backoff (up to 10 retries). Connection status
    is shown as a colored dot next to the camera label.
 
-   The MJPEG stream is FPS throttled on the backend: 30fps idle, 15fps during recording.
+   The MJPEG stream is FPS throttled on the backend: 30fps idle, 10fps during recording.
 
 Tagging
 -------
@@ -102,7 +102,9 @@ Tagging
 
    .. js:function:: detectCameraType(filename)
 
-      Infers camera view from filename suffix (``_camera1`` = frontale, ``_camera2`` = sagittale).
+      Infers camera view from filename suffix.  Recognises both legacy naming
+      (``_camera1`` = frontale, ``_camera2`` = sagittale) and the current naming
+      convention (``_CF`` = frontale, ``_CS`` = sagittale).
 
    Two camera types have different tag directions:
 

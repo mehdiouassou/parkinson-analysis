@@ -5,7 +5,7 @@
     <meta name="color-scheme" content="light dark"><link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html">
 
     <!-- Generated with Sphinx 8.1.3 and Furo 2025.12.19 -->
-        <title>processing - Parkinson Analysis 1.0.0 documentation</title>
+        <title>processing - Parkinson Analysis 2.0.0 documentation</title>
       <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
@@ -160,7 +160,7 @@
       </label>
     </div>
     <div class="header-center">
-      <a href="../index.html"><div class="brand">Parkinson Analysis 1.0.0 documentation</div></a>
+      <a href="../index.html"><div class="brand">Parkinson Analysis 2.0.0 documentation</div></a>
     </div>
     <div class="header-right">
       <div class="theme-toggle-container theme-toggle-header">
@@ -181,7 +181,7 @@
       
       <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
   
-  <span class="sidebar-brand-text">Parkinson Analysis 1.0.0 documentation</span>
+  <span class="sidebar-brand-text">Parkinson Analysis 2.0.0 documentation</span>
   
 </a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
   <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
@@ -191,13 +191,13 @@
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
   <p class="caption" role="heading"><span class="caption-text">Backend</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="../backend/main.html">API: Main Application (FastAPI)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/processing.html">API: Processing (YOLOv8 &amp; Motion)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/main.html">Main Application (FastAPI)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/camera.html">Camera Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/config.html">Configuration</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../backend/conversion.html">Conversion Pipeline</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/camera.html">API: Camera Interface (RealSense/Bag)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/config.html">API: Configuration</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/models.html">API: Data Models (Pydantic)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../backend/writers.html">API: Writers (Video &amp; Data)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/processing.html">Processing Pipeline (YOLOv8)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/models.html">Data Models (Pydantic)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backend/writers.html">Writers</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">Frontend</span></p>
 <ul>
@@ -254,6 +254,7 @@
 <span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">threading</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">uuid</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">datetime</span>
@@ -289,7 +290,13 @@
         <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Processing] Warning: Neither .engine nor .pt model found. Will attempt to download .pt on first use.&quot;</span><span class="p">)</span>
         <span class="n">MODEL_PATH</span> <span class="o">=</span> <span class="n">fallback_path</span>
 
-<span class="n">ai_model</span> <span class="o">=</span> <span class="n">YOLO</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">MODEL_PATH</span><span class="p">))</span> <span class="k">if</span> <span class="n">HAS_GPU_AI</span> <span class="k">else</span> <span class="kc">None</span>
+<span class="n">ai_model</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="k">if</span> <span class="n">HAS_GPU_AI</span><span class="p">:</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">ai_model</span> <span class="o">=</span> <span class="n">YOLO</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">MODEL_PATH</span><span class="p">))</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Processing] Failed to load YOLO model from </span><span class="si">{</span><span class="n">MODEL_PATH</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">HAS_GPU_AI</span> <span class="o">=</span> <span class="kc">False</span>
 
 
 <span class="c1"># =============================================================================</span>
@@ -620,22 +627,30 @@
         <span class="n">prev_pts</span> <span class="o">=</span> <span class="n">prev_landmarks</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="p">[])</span>
         <span class="n">curr_pts</span> <span class="o">=</span> <span class="n">curr_landmarks</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="p">[])</span>
         <span class="k">if</span> <span class="n">prev_pts</span> <span class="ow">and</span> <span class="n">curr_pts</span><span class="p">:</span>
-            <span class="n">dx</span> <span class="o">=</span> <span class="n">curr_pts</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;x&quot;</span><span class="p">]</span> <span class="o">-</span> <span class="n">prev_pts</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;x&quot;</span><span class="p">]</span>
-            <span class="n">dy</span> <span class="o">=</span> <span class="n">curr_pts</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;y&quot;</span><span class="p">]</span> <span class="o">-</span> <span class="n">prev_pts</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;y&quot;</span><span class="p">]</span>
-            <span class="n">dist</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">dx</span> <span class="o">*</span> <span class="n">dx</span> <span class="o">+</span> <span class="n">dy</span> <span class="o">*</span> <span class="n">dy</span><span class="p">)</span>
-            <span class="n">point_motions</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">dist</span><span class="p">)</span>
-            <span class="n">total_motion</span> <span class="o">+=</span> <span class="n">dist</span>
+            <span class="c1"># Check if either point has zero confidence (failed detection)</span>
+            <span class="c1"># YOLOv8-Pose usually gives (0,0) with conf &lt; threshold</span>
+            <span class="c1"># Assume we only use points with valid confidence if available, </span>
+            <span class="c1"># or check coordinates &gt; 0</span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">curr_pts</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;x&quot;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="ow">or</span> <span class="n">curr_pts</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;y&quot;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span> <span class="ow">and</span> \
+               <span class="p">(</span><span class="n">prev_pts</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;x&quot;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="ow">or</span> <span class="n">prev_pts</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;y&quot;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">):</span>
+                <span class="n">dx</span> <span class="o">=</span> <span class="n">curr_pts</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;x&quot;</span><span class="p">]</span> <span class="o">-</span> <span class="n">prev_pts</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;x&quot;</span><span class="p">]</span>
+                <span class="n">dy</span> <span class="o">=</span> <span class="n">curr_pts</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;y&quot;</span><span class="p">]</span> <span class="o">-</span> <span class="n">prev_pts</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;y&quot;</span><span class="p">]</span>
+                <span class="n">dist</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">dx</span> <span class="o">*</span> <span class="n">dx</span> <span class="o">+</span> <span class="n">dy</span> <span class="o">*</span> <span class="n">dy</span><span class="p">)</span>
+                <span class="n">point_motions</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">dist</span><span class="p">)</span>
+                <span class="n">total_motion</span> <span class="o">+=</span> <span class="n">dist</span>
 
     <span class="c1"># Ears (list of 2) — optional based on config</span>
     <span class="k">if</span> <span class="s2">&quot;ears&quot;</span> <span class="ow">in</span> <span class="n">motion_kps</span><span class="p">:</span>
         <span class="n">prev_ears</span> <span class="o">=</span> <span class="n">prev_landmarks</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;ears&quot;</span><span class="p">,</span> <span class="p">[])</span>
         <span class="n">curr_ears</span> <span class="o">=</span> <span class="n">curr_landmarks</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;ears&quot;</span><span class="p">,</span> <span class="p">[])</span>
         <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">min</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">prev_ears</span><span class="p">),</span> <span class="nb">len</span><span class="p">(</span><span class="n">curr_ears</span><span class="p">))):</span>
-            <span class="n">dx</span> <span class="o">=</span> <span class="n">curr_ears</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="s2">&quot;x&quot;</span><span class="p">]</span> <span class="o">-</span> <span class="n">prev_ears</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="s2">&quot;x&quot;</span><span class="p">]</span>
-            <span class="n">dy</span> <span class="o">=</span> <span class="n">curr_ears</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="s2">&quot;y&quot;</span><span class="p">]</span> <span class="o">-</span> <span class="n">prev_ears</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="s2">&quot;y&quot;</span><span class="p">]</span>
-            <span class="n">dist</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">dx</span> <span class="o">*</span> <span class="n">dx</span> <span class="o">+</span> <span class="n">dy</span> <span class="o">*</span> <span class="n">dy</span><span class="p">)</span>
-            <span class="n">point_motions</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">dist</span><span class="p">)</span>
-            <span class="n">total_motion</span> <span class="o">+=</span> <span class="n">dist</span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">curr_ears</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="s2">&quot;x&quot;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="ow">or</span> <span class="n">curr_ears</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="s2">&quot;y&quot;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span> <span class="ow">and</span> \
+               <span class="p">(</span><span class="n">prev_ears</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="s2">&quot;x&quot;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="ow">or</span> <span class="n">prev_ears</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="s2">&quot;y&quot;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">):</span>
+                <span class="n">dx</span> <span class="o">=</span> <span class="n">curr_ears</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="s2">&quot;x&quot;</span><span class="p">]</span> <span class="o">-</span> <span class="n">prev_ears</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="s2">&quot;x&quot;</span><span class="p">]</span>
+                <span class="n">dy</span> <span class="o">=</span> <span class="n">curr_ears</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="s2">&quot;y&quot;</span><span class="p">]</span> <span class="o">-</span> <span class="n">prev_ears</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="s2">&quot;y&quot;</span><span class="p">]</span>
+                <span class="n">dist</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">dx</span> <span class="o">*</span> <span class="n">dx</span> <span class="o">+</span> <span class="n">dy</span> <span class="o">*</span> <span class="n">dy</span><span class="p">)</span>
+                <span class="n">point_motions</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">dist</span><span class="p">)</span>
+                <span class="n">total_motion</span> <span class="o">+=</span> <span class="n">dist</span>
 
     <span class="n">avg_motion</span> <span class="o">=</span> <span class="n">total_motion</span> <span class="o">/</span> <span class="nb">max</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">point_motions</span><span class="p">),</span> <span class="mi">1</span><span class="p">)</span>
     <span class="n">max_motion</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">point_motions</span><span class="p">)</span> <span class="k">if</span> <span class="n">point_motions</span> <span class="k">else</span> <span class="mi">0</span>
@@ -672,11 +687,30 @@
 <span class="sd">        camera_num: Camera number (1 or 2)</span>
 <span class="sd">        batch_id: Video batch ID (timestamp prefix)</span>
 <span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
     <span class="k">try</span><span class="p">:</span>
         <span class="c1"># Priority: BAG (RealSense depth + RGB) &gt; MP4 (compressed preview)</span>
-        <span class="n">bag_file</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">batch_id</span><span class="si">}</span><span class="s2">_camera</span><span class="si">{</span><span class="n">camera_num</span><span class="si">}</span><span class="s2">.bag&quot;</span>
-        <span class="n">mp4_file</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">batch_id</span><span class="si">}</span><span class="s2">_camera</span><span class="si">{</span><span class="n">camera_num</span><span class="si">}</span><span class="s2">.mp4&quot;</span>
-        <span class="n">metadata_file</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">batch_id</span><span class="si">}</span><span class="s2">_camera</span><span class="si">{</span><span class="n">camera_num</span><span class="si">}</span><span class="s2">_metadata.json&quot;</span>
+        <span class="n">cam_key</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;camera</span><span class="si">{</span><span class="n">camera_num</span><span class="si">}</span><span class="s2">&quot;</span>
+        
+        <span class="c1"># Default assumption: old naming convention</span>
+        <span class="n">bag_file</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">batch_id</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">cam_key</span><span class="si">}</span><span class="s2">.bag&quot;</span>
+        
+        <span class="c1"># If not found, check for new naming convention (CF/CS)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">bag_file</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="n">suffix</span> <span class="o">=</span> <span class="s2">&quot;CF&quot;</span> <span class="k">if</span> <span class="n">camera_num</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">&quot;CS&quot;</span>
+            <span class="c1"># Pattern: YYYY-MM-DD_HH-MM-SS_CF_note.bag or just _CF.bag</span>
+            <span class="n">candidates</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">RECORDINGS_DIR</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">batch_id</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">suffix</span><span class="si">}</span><span class="s2">*.bag&quot;</span><span class="p">))</span>
+            <span class="k">if</span> <span class="n">candidates</span><span class="p">:</span>
+                <span class="n">bag_file</span> <span class="o">=</span> <span class="n">candidates</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Processing] Found renamed bag for </span><span class="si">{</span><span class="n">cam_key</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">bag_file</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># If still not found, check if it&#39;s the old naming but maybe with extra suffix? Unlikely but safe.</span>
+                <span class="c1"># Actually, if we didn&#39;t find the bag, we might still find an MP4 later.</span>
+                <span class="k">pass</span>
+
+        <span class="n">base_name</span> <span class="o">=</span> <span class="n">bag_file</span><span class="o">.</span><span class="n">stem</span>
+        <span class="n">mp4_file</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">base_name</span><span class="si">}</span><span class="s2">.mp4&quot;</span>
+        <span class="n">metadata_file</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">base_name</span><span class="si">}</span><span class="s2">_metadata.json&quot;</span>
 
         <span class="c1"># Determine which file to use</span>
         <span class="n">video_file</span> <span class="o">=</span> <span class="kc">None</span>
@@ -688,7 +722,18 @@
         <span class="k">elif</span> <span class="n">mp4_file</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
             <span class="n">video_file</span> <span class="o">=</span> <span class="n">mp4_file</span>
         <span class="k">else</span><span class="p">:</span>
-            <span class="k">raise</span> <span class="ne">FileNotFoundError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No video file found for </span><span class="si">{</span><span class="n">batch_id</span><span class="si">}</span><span class="s2">_camera</span><span class="si">{</span><span class="n">camera_num</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="c1"># Try finding just MP4 if bag missing</span>
+             <span class="k">if</span> <span class="ow">not</span> <span class="n">mp4_file</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+                <span class="n">suffix</span> <span class="o">=</span> <span class="s2">&quot;CF&quot;</span> <span class="k">if</span> <span class="n">camera_num</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">&quot;CS&quot;</span>
+                <span class="n">candidates</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">RECORDINGS_DIR</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">batch_id</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">suffix</span><span class="si">}</span><span class="s2">*.mp4&quot;</span><span class="p">))</span>
+                <span class="k">if</span> <span class="n">candidates</span><span class="p">:</span>
+                    <span class="n">mp4_file</span> <span class="o">=</span> <span class="n">candidates</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                    <span class="n">video_file</span> <span class="o">=</span> <span class="n">mp4_file</span>
+                    <span class="n">metadata_file</span> <span class="o">=</span> <span class="n">RECORDINGS_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">mp4_file</span><span class="o">.</span><span class="n">stem</span><span class="si">}</span><span class="s2">_metadata.json&quot;</span>
+             
+             <span class="k">if</span> <span class="ow">not</span> <span class="n">video_file</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">video_file</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+                <span class="k">raise</span> <span class="ne">FileNotFoundError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No video file found for </span><span class="si">{</span><span class="n">batch_id</span><span class="si">}</span><span class="s2"> camera </span><span class="si">{</span><span class="n">camera_num</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        
         
         
         <span class="c1"># ---------------------------------------------------------------------</span>
@@ -707,7 +752,7 @@
 
         <span class="n">update_job_progress</span><span class="p">(</span><span class="n">job_id</span><span class="p">,</span> <span class="n">camera_num</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="s2">&quot;Loading metadata...&quot;</span><span class="p">)</span>
 
-        <span class="n">patient_info</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;patient_name&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;patient_id&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;recorded_at&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">}</span>
+        <span class="n">patient_info</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;patient_id&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;recorded_at&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">}</span>
         <span class="n">meta_fps</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
         <span class="k">if</span> <span class="n">metadata_file</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
             <span class="k">try</span><span class="p">:</span>
@@ -736,8 +781,23 @@
         <span class="c1"># Use appropriate reader based on file type</span>
         <span class="k">if</span> <span class="n">use_bag</span><span class="p">:</span>
             <span class="n">cap</span> <span class="o">=</span> <span class="n">BagFileReader</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">video_file</span><span class="p">))</span>
-            <span class="c1"># BAG files don&#39;t expose frame count easily, estimate based on duration</span>
-            <span class="n">total_frames</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span>  <span class="c1"># Unknown, will count during processing</span>
+            <span class="n">total_frames</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span>
+
+            <span class="c1"># 1. Try metadata JSON (most accurate if recording finished cleanly)</span>
+            <span class="k">if</span> <span class="n">metadata_file</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">meta</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">metadata_file</span><span class="o">.</span><span class="n">read_text</span><span class="p">())</span>
+                    <span class="n">total_frames</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;bag_frames&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;mp4_frames&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="o">-</span><span class="mi">1</span>
+                <span class="k">except</span><span class="p">:</span>
+                    <span class="k">pass</span>
+            
+            <span class="c1"># 2. Fallback estimation based on file size if metadata missing</span>
+            <span class="k">if</span> <span class="n">total_frames</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+                 <span class="c1"># Empirical estimate for D455 BAGs (Depth + RGB): ~1.5 frames per MB</span>
+                 <span class="n">size_mb</span> <span class="o">=</span> <span class="n">video_file</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span> <span class="o">/</span> <span class="p">(</span><span class="mi">1024</span><span class="o">*</span><span class="mi">1024</span><span class="p">)</span>
+                 <span class="n">total_frames</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">size_mb</span> <span class="o">*</span> <span class="mf">1.5</span><span class="p">)</span>
+                 <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Processing] Estimated BAG frames from size: </span><span class="si">{</span><span class="n">total_frames</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
         <span class="k">else</span><span class="p">:</span>
             <span class="n">cap</span> <span class="o">=</span> <span class="n">cv2</span><span class="o">.</span><span class="n">VideoCapture</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">video_file</span><span class="p">))</span>
             <span class="n">total_frames</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">cap</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cv2</span><span class="o">.</span><span class="n">CAP_PROP_FRAME_COUNT</span><span class="p">))</span>
@@ -842,10 +902,11 @@
             <span class="c1"># Update progress (12% to 90% = 78% range for frame processing)</span>
             <span class="k">if</span> <span class="n">frames_processed</span> <span class="o">%</span> <span class="n">ANALYSIS_CONFIG</span><span class="p">[</span><span class="s2">&quot;progress_update_every_n_frames&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
                 <span class="k">if</span> <span class="n">total_frames</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
-                    <span class="n">progress</span> <span class="o">=</span> <span class="mi">12</span> <span class="o">+</span> <span class="nb">int</span><span class="p">((</span><span class="n">frames_processed</span> <span class="o">/</span> <span class="n">total_frames</span><span class="p">)</span> <span class="o">*</span> <span class="mi">78</span><span class="p">)</span>
-                    <span class="n">progress</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">progress</span><span class="p">,</span> <span class="mi">89</span><span class="p">)</span>
-                    <span class="n">frame_msg</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;Frame </span><span class="si">{</span><span class="n">frames_processed</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">total_frames</span><span class="si">}</span><span class="s2"> (detections: </span><span class="si">{</span><span class="n">persons_detected</span><span class="si">}</span><span class="s2">)&quot;</span>
+                    <span class="n">pct_complete</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">frames_processed</span> <span class="o">/</span> <span class="n">total_frames</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+                    <span class="n">progress</span> <span class="o">=</span> <span class="mi">12</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">pct_complete</span> <span class="o">*</span> <span class="mi">78</span><span class="p">)</span>
+                    <span class="n">frame_msg</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;Frame </span><span class="si">{</span><span class="n">frames_processed</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">total_frames</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">pct_complete</span><span class="o">*</span><span class="mi">100</span><span class="p">)</span><span class="si">}</span><span class="s2">%)&quot;</span>
                 <span class="k">else</span><span class="p">:</span>
+                    <span class="c1"># Logarithmic fallback if total_frames completely unknown</span>
                     <span class="n">REF_FRAMES</span> <span class="o">=</span> <span class="mi">6000</span>
                     <span class="n">progress</span> <span class="o">=</span> <span class="mi">12</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="mi">78</span> <span class="o">*</span> <span class="n">math</span><span class="o">.</span><span class="n">log1p</span><span class="p">(</span><span class="n">frames_processed</span><span class="p">)</span> <span class="o">/</span> <span class="n">math</span><span class="o">.</span><span class="n">log1p</span><span class="p">(</span><span class="n">REF_FRAMES</span><span class="p">))</span>
                     <span class="n">progress</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">progress</span><span class="p">,</span> <span class="mi">89</span><span class="p">)</span>
@@ -940,11 +1001,10 @@
         <span class="n">result_data</span> <span class="o">=</span> <span class="p">{</span>
             <span class="s2">&quot;batch_id&quot;</span><span class="p">:</span> <span class="n">batch_id</span><span class="p">,</span>
             <span class="s2">&quot;camera&quot;</span><span class="p">:</span> <span class="n">camera_num</span><span class="p">,</span>
-            <span class="s2">&quot;camera_type&quot;</span><span class="p">:</span> <span class="s2">&quot;sagittale&quot;</span> <span class="k">if</span> <span class="n">camera_num</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">&quot;frontale&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;camera_type&quot;</span><span class="p">:</span> <span class="s2">&quot;frontale&quot;</span> <span class="k">if</span> <span class="n">camera_num</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">&quot;sagittale&quot;</span><span class="p">,</span>
             <span class="s2">&quot;processed_at&quot;</span><span class="p">:</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">isoformat</span><span class="p">(),</span>
 
             <span class="s2">&quot;patient&quot;</span><span class="p">:</span> <span class="p">{</span>
-                <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="n">patient_info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;patient_name&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span>
                 <span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="n">patient_info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;patient_id&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span>
                 <span class="s2">&quot;recorded_at&quot;</span><span class="p">:</span> <span class="n">patient_info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;recorded_at&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
             <span class="p">},</span>
@@ -994,9 +1054,50 @@
 
             <span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="s2">&quot;completed&quot;</span>
         <span class="p">}</span>
+
+        <span class="c1"># --- TIMING LOGIC ---</span>
+        <span class="n">end_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        <span class="n">duration</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="n">end_time</span> <span class="o">-</span> <span class="n">start_time</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
         
-        <span class="c1"># Save analysis result</span>
-        <span class="n">result_filename</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">batch_id</span><span class="si">}</span><span class="s2">_camera</span><span class="si">{</span><span class="n">camera_num</span><span class="si">}</span><span class="s2">_analysis.json&quot;</span>
+        <span class="k">if</span> <span class="n">metadata_file</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">meta</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">metadata_file</span><span class="o">.</span><span class="n">read_text</span><span class="p">())</span>
+                <span class="n">meta</span><span class="p">[</span><span class="s2">&quot;processing_duration_s&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">duration</span>
+                
+                <span class="n">conv_dur</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;conversion_duration_s&quot;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">conv_dur</span><span class="p">:</span>
+                     <span class="n">meta</span><span class="p">[</span><span class="s2">&quot;total_duration_s&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="n">duration</span> <span class="o">+</span> <span class="nb">float</span><span class="p">(</span><span class="n">conv_dur</span><span class="p">),</span> <span class="mi">2</span><span class="p">)</span>
+                     
+                <span class="n">metadata_file</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">meta</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Processing] Updated metadata with duration: </span><span class="si">{</span><span class="n">duration</span><span class="si">}</span><span class="s2">s&quot;</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Processing] Failed to update metadata duration: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Save analysis result with standardized naming:</span>
+        <span class="c1"># {batch_id}_{CF|CS}_{patient_id}_{note}_analysis.json</span>
+        
+        <span class="c1"># Determine camera label</span>
+        <span class="n">cam_label</span> <span class="o">=</span> <span class="s2">&quot;CF&quot;</span> <span class="k">if</span> <span class="n">camera_num</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">&quot;CS&quot;</span>
+        
+        <span class="c1"># Extract metadata fields</span>
+        <span class="n">patient_id</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+        <span class="n">note</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">metadata_file</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">meta</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">metadata_file</span><span class="o">.</span><span class="n">read_text</span><span class="p">())</span>
+                <span class="n">patient_id</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;patient_id&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+                <span class="n">note</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;note&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+            <span class="k">except</span><span class="p">:</span>
+                <span class="k">pass</span>
+        
+        <span class="c1"># Build filename parts</span>
+        <span class="n">name_parts</span> <span class="o">=</span> <span class="p">[</span><span class="n">batch_id</span><span class="p">,</span> <span class="n">cam_label</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">patient_id</span><span class="p">:</span> <span class="n">name_parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">patient_id</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">note</span><span class="p">:</span> <span class="n">name_parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">note</span><span class="p">)</span>
+        <span class="n">name_parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;analysis&quot;</span><span class="p">)</span>
+        
+        <span class="n">result_filename</span> <span class="o">=</span> <span class="s2">&quot;_&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">name_parts</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;.json&quot;</span>
+        
         <span class="n">result_path</span> <span class="o">=</span> <span class="n">PROCESSED_DIR</span> <span class="o">/</span> <span class="n">result_filename</span>
         <span class="n">result_path</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">result_data</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
         <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Processing] Saved: </span><span class="si">{</span><span class="n">result_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
@@ -1155,7 +1256,7 @@
       
     </aside>
   </div>
-</div><script src="../_static/documentation_options.js?v=8d563738"></script>
+</div><script src="../_static/documentation_options.js?v=51b770b3"></script>
     <script src="../_static/doctools.js?v=9bcbadda"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/scripts/furo.js?v=46bd48cc"></script>

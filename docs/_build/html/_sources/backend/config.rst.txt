@@ -24,12 +24,22 @@ Video settings
 Device detection
 ----------------
 
-``detect_realsense_devices()`` does a single pass query of connected RealSense devices.
-No retries, no waits. If the device is there its instant, if not it returns empty.
-Results are cached and can be refreshed with ``refresh_camera_detection()``.
+``detect_realsense_devices()`` does a single-pass query of connected RealSense devices.
+No retries, no waits. If the device is there it is instant; if not it returns empty.
+Results are cached and can be refreshed with ``refresh_camera_detection()`` which
+includes a USB settle delay and retry loop (up to 4 attempts with increasing backoff)
+because cameras need time after ``pipeline.stop()`` before they can be re-enumerated.
 
 Devices are mapped to logical camera IDs in order of detection:
-camera 0 = first device (Front), camera 1 = second device (Side).
+camera 0 = first device (Front/Frontale), camera 1 = second device (Side/Sagittale).
+
+Camera type constants
+---------------------
+
+- ``CAMERA_TYPE_REALSENSE`` — live RealSense camera
+- ``CAMERA_TYPE_BAG_FILE`` — ``.bag`` file playback
+- ``CAMERA_TYPE_WEBCAM`` — kept for backward compatibility when reading old metadata; no
+  webcam backend exists in the current codebase
 
 API reference
 -------------

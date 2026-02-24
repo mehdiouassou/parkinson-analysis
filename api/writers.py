@@ -1,12 +1,20 @@
 """
-Video Writer Factory
+Video Writer Utilities
+======================
 
-Creates appropriate video writers for RealSense-only recording:
-    - BAG (RealSense): Full depth + RGB data for processing
-    - MP4 (H.264): Compressed RGB, browser-compatible, for viewing/tagging
+Writer classes used across the recording and conversion pipelines:
 
-Recording Behavior:
-    - RealSense cameras: .bag (depth + RGB) + .mp4 (RGB preview)
+    - **BagWriter**: Wraps the RealSense SDK recorder for .bag (depth + RGB) capture.
+      Used during live recording via :func:`camera.CameraSource.start_recording`.
+    - **FFmpegWriter**: Pipes raw BGR24 frames to an FFmpeg subprocess that encodes
+      browser-compatible H.264 MP4. Used by the post-recording conversion pipeline
+      (:mod:`conversion`) and the ``/recordings/fix-mp4-codec`` maintenance route.
+    - **create_mp4_writer**: Factory that prefers FFmpegWriter and falls back to
+      OpenCV's ``VideoWriter`` when FFmpeg is unavailable.
+
+.. note::
+   During live recording only .bag files are written. MP4 files are produced
+   *after* recording by the Conversion page (``POST /conversion/start``).
 """
 
 import cv2

@@ -19,11 +19,12 @@ The backend handles everything hardware related: camera detection, BAG recording
 processing. The frontend is just a dashboard that talks to the backend over REST.
 
 **Recording flow**: user clicks record, 3 second warmup, both cameras start BAG recording in
-parallel threads, MJPEG preview throttled to 15fps during recording, user clicks stop, metadata
+parallel threads, MJPEG preview throttled to 10fps during recording, user clicks stop, metadata
 sidecars written.
 
-**Conversion flow**: BAG files replayed at max speed, frames piped to FFmpeg, tries NVENC first
-then falls back to x264, frame count validated, temp file renamed to .mp4 on success.
+**Conversion flow**: BAG files replayed at max speed, frames piped to the encoder. Encoder
+priority: ``nvv4l2h264enc`` (Jetson GStreamer) then ``h264_nvenc`` (Desktop NVENC) then
+``libx264`` (CPU fallback). Frame count validated, temp file renamed to .mp4 on success.
 
 **Processing flow**: YOLOv8 pose inference on each frame, keypoints extracted, motion vectors
 calculated, tremor detected, JSON report saved.
@@ -39,7 +40,15 @@ sidecar and shown in the quality analysis page. Typical offset is under 500ms.
 The pause/resume system uses the RealSense SDK recorder device ``pause()``/``resume()`` for real
 BAG pausing (no dead frames written during pause).
 
-Streaming is throttled to 30fps idle, 15fps during recording to save CPU and USB bandwidth.
+Streaming is throttled to 30fps idle, 10fps during recording to save CPU and USB bandwidth.
+
+
+File naming convention
+^^^^^^^^^^^^^^^^^^^^^^
+
+Recordings follow the pattern ``{timestamp}_{CF|CS}_{patient_id}_{note}.ext`` where
+**CF** = Camera Frontale (front view, camera 1) and **CS** = Camera Sagittale (side view,
+camera 2). Legacy recordings using ``_camera1``/``_camera2`` naming are still recognised.
 
 
 Known limitations

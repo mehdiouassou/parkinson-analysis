@@ -28,8 +28,21 @@ written to the BAG file.
 Global management
 -----------------
 
-``get_camera_source(camera_id)`` lazily creates and starts cameras in background threads.
+``get_camera_source(camera_id)`` is a pure getter that returns an existing ``CameraSource``
+or creates an uninitialised placeholder. It never starts or restarts cameras.
+Camera lifecycle is managed by ``startup_all_cameras()`` (called once on server boot)
+and ``restart_all_cameras()`` (explicit user action via ``POST /cameras/restart``).
 ``shutdown_all_cameras()`` stops everything cleanly on app shutdown.
+
+Recording uses a two-phase barrier synchronisation protocol. ``prepare_recording()`` stops
+the old pipeline and builds a new config with recording enabled (slow, ~1--3 s per camera,
+runs in parallel). ``commit_recording()`` waits at a ``threading.Barrier`` so all cameras
+call ``pipeline.start()`` simultaneously (fast, ~100--300 ms). This reduces the
+inter-camera start offset from ~2 s (sequential) to < 100 ms.
+
+During recording, hardware timestamps (``color_frame.get_timestamp()``) are tracked for
+post-hoc synchronisation analysis. The first and last timestamps, timestamp domain, and
+frame count are stored in the metadata sidecar at recording stop.
 
 API reference
 -------------

@@ -6,7 +6,7 @@
 <link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="Conversion Pipeline" href="conversion.html"><link rel="prev" title="Camera Interface" href="camera.html">
 
     <!-- Generated with Sphinx 8.1.3 and Furo 2025.12.19 -->
-        <title>Configuration - Parkinson Analysis 1.0.0 documentation</title>
+        <title>Configuration - Parkinson Analysis 2.0.0 documentation</title>
       <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
@@ -161,7 +161,7 @@
       </label>
     </div>
     <div class="header-center">
-      <a href="../index.html"><div class="brand">Parkinson Analysis 1.0.0 documentation</div></a>
+      <a href="../index.html"><div class="brand">Parkinson Analysis 2.0.0 documentation</div></a>
     </div>
     <div class="header-right">
       <div class="theme-toggle-container theme-toggle-header">
@@ -182,7 +182,7 @@
       
       <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
   
-  <span class="sidebar-brand-text">Parkinson Analysis 1.0.0 documentation</span>
+  <span class="sidebar-brand-text">Parkinson Analysis 2.0.0 documentation</span>
   
 </a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
   <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
@@ -269,11 +269,22 @@ backend needs to know about the runtime environment lives here.</p>
 </section>
 <section id="device-detection">
 <h2>Device detection<a class="headerlink" href="#device-detection" title="Link to this heading">¶</a></h2>
-<p><code class="docutils literal notranslate"><span class="pre">detect_realsense_devices()</span></code> does a single pass query of connected RealSense devices.
-No retries, no waits. If the device is there its instant, if not it returns empty.
-Results are cached and can be refreshed with <code class="docutils literal notranslate"><span class="pre">refresh_camera_detection()</span></code>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">detect_realsense_devices()</span></code> does a single-pass query of connected RealSense devices.
+No retries, no waits. If the device is there it is instant; if not it returns empty.
+Results are cached and can be refreshed with <code class="docutils literal notranslate"><span class="pre">refresh_camera_detection()</span></code> which
+includes a USB settle delay and retry loop (up to 4 attempts with increasing backoff)
+because cameras need time after <code class="docutils literal notranslate"><span class="pre">pipeline.stop()</span></code> before they can be re-enumerated.</p>
 <p>Devices are mapped to logical camera IDs in order of detection:
-camera 0 = first device (Front), camera 1 = second device (Side).</p>
+camera 0 = first device (Front/Frontale), camera 1 = second device (Side/Sagittale).</p>
+</section>
+<section id="camera-type-constants">
+<h2>Camera type constants<a class="headerlink" href="#camera-type-constants" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">CAMERA_TYPE_REALSENSE</span></code> — live RealSense camera</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">CAMERA_TYPE_BAG_FILE</span></code> — <code class="docutils literal notranslate"><span class="pre">.bag</span></code> file playback</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">CAMERA_TYPE_WEBCAM</span></code> — kept for backward compatibility when reading old metadata; no
+webcam backend exists in the current codebase</p></li>
+</ul>
 </section>
 <section id="module-config">
 <span id="api-reference"></span><h2>API reference<a class="headerlink" href="#module-config" title="Link to this heading">¶</a></h2>
@@ -293,14 +304,14 @@ BAG_FILE_CAM2: Path to .bag file for camera 2 (mock_bag mode)</p>
 API_HOST: Host for API (default localhost, use 0.0.0.0 for remote)</p>
 </dd>
 <dt>Camera Type Priority:</dt><dd><ul class="simple">
-<li><p>Camera 0 (CAM1/Front) is the first detected RealSense device</p></li>
-<li><p>Camera 1 (CAM2/Side) is the second detected RealSense device</p></li>
+<li><p>Camera 0 (CAM1/Front/Frontale) is the first detected RealSense device</p></li>
+<li><p>Camera 1 (CAM2/Side/Sagittale) is the second detected RealSense device</p></li>
 </ul>
 </dd>
 <dt>Recording Behavior:</dt><dd><ul class="simple">
-<li><p>RealSense cameras: .bag (depth + RGB) + .mp4 (RGB preview)</p></li>
-<li><p>Viewing/Tagging always uses .mp4 stream</p></li>
-<li><p>Processing uses .bag (RealSense depth + RGB)</p></li>
+<li><p>RealSense cameras record .bag (depth + RGB) only — zero-drop, SDK-managed</p></li>
+<li><p>.mp4 files are generated post-recording via the Conversion pipeline</p></li>
+<li><p>Viewing/Tagging uses .mp4 files; Processing prefers .bag for depth data</p></li>
 </ul>
 </dd>
 </dl>
@@ -324,7 +335,7 @@ API_HOST: Host for API (default localhost, use 0.0.0.0 for remote)</p>
 <dd><p>Get the type of camera at given logical ID.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>camera_id</strong> – Camera index (0 = Front/Sagittale, 1 = Side/Frontale)</p>
+<dd class="field-odd"><p><strong>camera_id</strong> – Camera index (0 = Front/Frontale, 1 = Side/Sagittale)</p>
 </dd>
 <dt class="field-even">Returns<span class="colon">:</span></dt>
 <dd class="field-even"><p>CAMERA_TYPE_REALSENSE or CAMERA_TYPE_BAG_FILE</p>
@@ -346,8 +357,8 @@ API_HOST: Host for API (default localhost, use 0.0.0.0 for remote)</p>
 <span class="p">}</span>
 </pre></div>
 </div>
-<p>Camera 0 = Front/Sagittale (first detected device)
-Camera 1 = Side/Frontale  (second detected device)</p>
+<p>Camera 0 = Front/Frontale  (first detected device)
+Camera 1 = Side/Sagittale (second detected device)</p>
 </dd></dl>
 
 <dl class="py function">
@@ -359,7 +370,11 @@ Camera 1 = Side/Frontale  (second detected device)</p>
 <dl class="py function">
 <dt class="sig sig-object py" id="config.refresh_camera_detection">
 <span class="sig-prename descclassname"><span class="pre">config.</span></span><span class="sig-name descname"><span class="pre">refresh_camera_detection</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/config.html#refresh_camera_detection"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#config.refresh_camera_detection" title="Link to this definition">¶</a></dt>
-<dd><p>Force re-detection of cameras. Call when cameras may have changed.</p>
+<dd><p>Force re-detection of cameras.</p>
+<p>Thread-safe: uses _detection_lock to guarantee only one thread
+enumerates USB devices at a time.  Includes a USB settle delay
+and retry loop because RealSense cameras need time after
+pipeline.stop() before they can be re-enumerated.</p>
 </dd></dl>
 
 </section>
@@ -424,6 +439,7 @@ Camera 1 = Side/Frontale  (second detected device)</p>
 <li><a class="reference internal" href="#environment-variables">Environment variables</a></li>
 <li><a class="reference internal" href="#video-settings">Video settings</a></li>
 <li><a class="reference internal" href="#device-detection">Device detection</a></li>
+<li><a class="reference internal" href="#camera-type-constants">Camera type constants</a></li>
 <li><a class="reference internal" href="#module-config">API reference</a><ul>
 <li><a class="reference internal" href="#config.detect_realsense_devices"><code class="docutils literal notranslate"><span class="pre">detect_realsense_devices()</span></code></a></li>
 <li><a class="reference internal" href="#config.get_camera_type"><code class="docutils literal notranslate"><span class="pre">get_camera_type()</span></code></a></li>
@@ -443,7 +459,7 @@ Camera 1 = Side/Frontale  (second detected device)</p>
       
     </aside>
   </div>
-</div><script src="../_static/documentation_options.js?v=8d563738"></script>
+</div><script src="../_static/documentation_options.js?v=51b770b3"></script>
     <script src="../_static/doctools.js?v=9bcbadda"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/scripts/furo.js?v=46bd48cc"></script>

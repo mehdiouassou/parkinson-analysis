@@ -14,13 +14,13 @@ Environment Variables:
     API_HOST: Host for API (default localhost, use 0.0.0.0 for remote)
 
 Camera Type Priority:
-    - Camera 0 (CAM1/Front) is the first detected RealSense device
-    - Camera 1 (CAM2/Side) is the second detected RealSense device
+    - Camera 0 (CAM1/Front/Frontale) is the first detected RealSense device
+    - Camera 1 (CAM2/Side/Sagittale) is the second detected RealSense device
 
 Recording Behavior:
-    - RealSense cameras: .bag (depth + RGB) + .mp4 (RGB preview)
-    - Viewing/Tagging always uses .mp4 stream
-    - Processing uses .bag (RealSense depth + RGB)
+    - RealSense cameras record .bag (depth + RGB) only — zero-drop, SDK-managed
+    - .mp4 files are generated post-recording via the Conversion pipeline
+    - Viewing/Tagging uses .mp4 files; Processing prefers .bag for depth data
 """
 
 import os
@@ -53,8 +53,8 @@ CAMERA_MODE = os.environ.get("CAMERA_MODE", "auto")
 
 # Path to sample .bag files for mock_bag mode (download from Intel)
 BAG_FILES = {
-    0: os.environ.get("BAG_FILE_CAM1", ""),  # Camera 1: Front/Sagittale
-    1: os.environ.get("BAG_FILE_CAM2", ""),  # Camera 2: Side/Frontale
+    0: os.environ.get("BAG_FILE_CAM1", ""),  # Camera 1: Front/Frontale
+    1: os.environ.get("BAG_FILE_CAM2", ""),  # Camera 2: Side/Sagittale
 }
 
 # Camera type constants
@@ -177,8 +177,8 @@ def get_detected_cameras():
             1: {"type": "realsense", "serial": "...", "name": "..."}
         }
 
-    Camera 0 = Front/Sagittale (first detected device)
-    Camera 1 = Side/Frontale  (second detected device)
+    Camera 0 = Front/Frontale  (first detected device)
+    Camera 1 = Side/Sagittale (second detected device)
     """
 
     global _detected_realsense, _realsense_count
@@ -207,7 +207,7 @@ def get_camera_type(camera_id: int) -> str:
     Get the type of camera at given logical ID.
 
     Args:
-        camera_id: Camera index (0 = Front/Sagittale, 1 = Side/Frontale)
+        camera_id: Camera index (0 = Front/Frontale, 1 = Side/Sagittale)
 
     Returns:
         Camera type constant: CAMERA_TYPE_REALSENSE or CAMERA_TYPE_BAG_FILE

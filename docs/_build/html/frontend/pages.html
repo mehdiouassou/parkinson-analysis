@@ -6,7 +6,7 @@
 <link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="Components" href="components.html"><link rel="prev" title="Frontend" href="index.html">
 
     <!-- Generated with Sphinx 8.1.3 and Furo 2025.12.19 -->
-        <title>Pages - Parkinson Analysis 1.0.0 documentation</title>
+        <title>Pages - Parkinson Analysis 2.0.0 documentation</title>
       <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
@@ -161,7 +161,7 @@
       </label>
     </div>
     <div class="header-center">
-      <a href="../index.html"><div class="brand">Parkinson Analysis 1.0.0 documentation</div></a>
+      <a href="../index.html"><div class="brand">Parkinson Analysis 2.0.0 documentation</div></a>
     </div>
     <div class="header-right">
       <div class="theme-toggle-container theme-toggle-header">
@@ -182,7 +182,7 @@
       
       <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
   
-  <span class="sidebar-brand-text">Parkinson Analysis 1.0.0 documentation</span>
+  <span class="sidebar-brand-text">Parkinson Analysis 2.0.0 documentation</span>
   
 </a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
   <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
@@ -314,15 +314,15 @@ Useful when physical cameras are plugged into the wrong ports.</p>
 <dl class="js function">
 <dt class="sig sig-object js" id="CameraFeeds.handleRefresh">
 <span class="sig-prename descclassname"><span class="n"><span class="pre">CameraFeeds</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">handleRefresh</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#CameraFeeds.handleRefresh" title="Link to this definition">¶</a></dt>
-<dd><p>Calls <code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/cameras/refresh</span></code> to re detect cameras after plug/unplug.
-Disabled during active recording (would kill the streams).</p>
+<dd><p>Calls <code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/cameras/restart</span></code> to hard-restart all cameras (stop, USB settle,
+re-detect, start). Disabled during active recording (would kill the streams).</p>
 </dd></dl>
 
 <p><strong>Camera feeds</strong></p>
 <p>Each camera feed is an <code class="docutils literal notranslate"><span class="pre">&lt;img&gt;</span></code> tag pointing at the MJPEG stream endpoint.
 On error it retries with exponential backoff (up to 10 retries). Connection status
 is shown as a colored dot next to the camera label.</p>
-<p>The MJPEG stream is FPS throttled on the backend: 30fps idle, 15fps during recording.</p>
+<p>The MJPEG stream is FPS throttled on the backend: 30fps idle, 10fps during recording.</p>
 </dd></dl>
 
 </section>
@@ -369,7 +369,9 @@ Used for frame accurate seeking.</p>
 <dl class="js function">
 <dt class="sig sig-object js" id="Tagging.detectCameraType">
 <span class="sig-prename descclassname"><span class="n"><span class="pre">Tagging</span></span><span class="p"><span class="pre">.</span></span></span><span class="sig-name descname"><span class="n"><span class="pre">detectCameraType</span></span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filename</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#Tagging.detectCameraType" title="Link to this definition">¶</a></dt>
-<dd><p>Infers camera view from filename suffix (<code class="docutils literal notranslate"><span class="pre">_camera1</span></code> = frontale, <code class="docutils literal notranslate"><span class="pre">_camera2</span></code> = sagittale).</p>
+<dd><p>Infers camera view from filename suffix.  Recognises both legacy naming
+(<code class="docutils literal notranslate"><span class="pre">_camera1</span></code> = frontale, <code class="docutils literal notranslate"><span class="pre">_camera2</span></code> = sagittale) and the current naming
+convention (<code class="docutils literal notranslate"><span class="pre">_CF</span></code> = frontale, <code class="docutils literal notranslate"><span class="pre">_CS</span></code> = sagittale).</p>
 </dd></dl>
 
 <p>Two camera types have different tag directions:</p>
@@ -575,7 +577,7 @@ that MP4 files inherit the BAG offset</p></li>
       
     </aside>
   </div>
-</div><script src="../_static/documentation_options.js?v=8d563738"></script>
+</div><script src="../_static/documentation_options.js?v=51b770b3"></script>
     <script src="../_static/doctools.js?v=9bcbadda"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/scripts/furo.js?v=46bd48cc"></script>

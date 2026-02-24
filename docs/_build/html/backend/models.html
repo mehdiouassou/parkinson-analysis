@@ -6,7 +6,7 @@
 <link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="Writers" href="writers.html"><link rel="prev" title="Processing Pipeline (YOLOv8)" href="processing.html">
 
     <!-- Generated with Sphinx 8.1.3 and Furo 2025.12.19 -->
-        <title>Data Models (Pydantic) - Parkinson Analysis 1.0.0 documentation</title>
+        <title>Data Models (Pydantic) - Parkinson Analysis 2.0.0 documentation</title>
       <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
@@ -161,7 +161,7 @@
       </label>
     </div>
     <div class="header-center">
-      <a href="../index.html"><div class="brand">Parkinson Analysis 1.0.0 documentation</div></a>
+      <a href="../index.html"><div class="brand">Parkinson Analysis 2.0.0 documentation</div></a>
     </div>
     <div class="header-right">
       <div class="theme-toggle-container theme-toggle-header">
@@ -182,7 +182,7 @@
       
       <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
   
-  <span class="sidebar-brand-text">Parkinson Analysis 1.0.0 documentation</span>
+  <span class="sidebar-brand-text">Parkinson Analysis 2.0.0 documentation</span>
   
 </a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
   <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
@@ -317,9 +317,16 @@ automatic request parsing and OpenAPI schema generation.</p>
 <span class="sig-name descname"><span class="pre">patientId</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">''</span></em><a class="headerlink" href="#models.RecordingStartRequest.patientId" title="Link to this definition">¶</a></dt>
 <dd></dd></dl>
 
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="models.RecordingStopRequest">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">models.</span></span><span class="sig-name descname"><span class="pre">RecordingStopRequest</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/models.html#RecordingStopRequest"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#models.RecordingStopRequest" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">BaseModel</span></code></p>
+<p>Request to stop a recording session with optional notes.</p>
 <dl class="py attribute">
-<dt class="sig sig-object py" id="models.RecordingStartRequest.patientName">
-<span class="sig-name descname"><span class="pre">patientName</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">''</span></em><a class="headerlink" href="#models.RecordingStartRequest.patientName" title="Link to this definition">¶</a></dt>
+<dt class="sig sig-object py" id="models.RecordingStopRequest.note">
+<span class="sig-name descname"><span class="pre">note</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">''</span></em><a class="headerlink" href="#models.RecordingStopRequest.note" title="Link to this definition">¶</a></dt>
 <dd></dd></dl>
 
 </dd></dl>
@@ -419,7 +426,10 @@ automatic request parsing and OpenAPI schema generation.</p>
 </li>
 <li><a class="reference internal" href="#models.RecordingStartRequest"><code class="docutils literal notranslate"><span class="pre">RecordingStartRequest</span></code></a><ul>
 <li><a class="reference internal" href="#models.RecordingStartRequest.patientId"><code class="docutils literal notranslate"><span class="pre">RecordingStartRequest.patientId</span></code></a></li>
-<li><a class="reference internal" href="#models.RecordingStartRequest.patientName"><code class="docutils literal notranslate"><span class="pre">RecordingStartRequest.patientName</span></code></a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#models.RecordingStopRequest"><code class="docutils literal notranslate"><span class="pre">RecordingStopRequest</span></code></a><ul>
+<li><a class="reference internal" href="#models.RecordingStopRequest.note"><code class="docutils literal notranslate"><span class="pre">RecordingStopRequest.note</span></code></a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#models.SaveTaggingRequest"><code class="docutils literal notranslate"><span class="pre">SaveTaggingRequest</span></code></a><ul>
@@ -440,7 +450,7 @@ automatic request parsing and OpenAPI schema generation.</p>
       
     </aside>
   </div>
-</div><script src="../_static/documentation_options.js?v=8d563738"></script>
+</div><script src="../_static/documentation_options.js?v=51b770b3"></script>
     <script src="../_static/doctools.js?v=9bcbadda"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/scripts/furo.js?v=46bd48cc"></script>

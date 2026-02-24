@@ -8,11 +8,14 @@ Config
 
 .. js:attribute:: API_URL
 
-   ``string`` — Backend base URL. Reads ``VITE_API_URL`` at build time; falls back to ``http://localhost:8000``.
+   ``string`` — Backend base URL. Reads ``VITE_API_URL`` at build time; falls back to
+   ``http://<current_hostname>:8000`` (dynamic, based on the browser's ``window.location.hostname``).
+   This allows the frontend to reach the API on the same host without hardcoding ``localhost``,
+   which is essential when accessing the dashboard from a remote machine (e.g. a Jetson).
 
    .. code-block:: typescript
 
-      export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      export const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`;
 
 Types
 -----
