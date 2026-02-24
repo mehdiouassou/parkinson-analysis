@@ -14,6 +14,7 @@ import json
 import math
 import numpy as np
 import os
+import time
 import threading
 import uuid
 from datetime import datetime
@@ -49,7 +50,13 @@ if HAS_GPU_AI and not MODEL_PATH.exists():
         print(f"[Processing] Warning: Neither .engine nor .pt model found. Will attempt to download .pt on first use.")
         MODEL_PATH = fallback_path
 
-ai_model = YOLO(str(MODEL_PATH)) if HAS_GPU_AI else None
+ai_model = None
+if HAS_GPU_AI:
+    try:
+        ai_model = YOLO(str(MODEL_PATH))
+    except Exception as e:
+        print(f"[Processing] Failed to load YOLO model from {MODEL_PATH}: {e}")
+        HAS_GPU_AI = False
 
 
 # =============================================================================
@@ -706,7 +713,7 @@ def process_video(job_id: str, camera_num: int, batch_id: str):
         result_data = {
             "batch_id": batch_id,
             "camera": camera_num,
-            "camera_type": "sagittale" if camera_num == 1 else "frontale",
+            "camera_type": "frontale" if camera_num == 1 else "sagittale",
             "processed_at": datetime.now().isoformat(),
 
             "patient": {

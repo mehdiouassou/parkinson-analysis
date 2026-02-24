@@ -351,12 +351,16 @@ def _convert_single_camera(job_id: str, cam_num: int, batch_id: str):
         _update({"status": "cancelled"})
         return
 
-    # ---- Encoder loop — try NVENC first, then libx264 ----
+    # ---- Encoder loop — try Jetson NVENC, then desktop NVENC, then libx264 ----
 
     encoder_configs = [
         (
             "nvv4l2h264enc",  # Jetson GStreamer hardware acceleration (H.264)
             [],
+        ),
+        (
+            "h264_nvenc",     # Desktop NVIDIA NVENC hardware acceleration (H.264)
+            ["-c:v", "h264_nvenc", "-preset", "p4", "-tune", "ll", "-b:v", "4M", "-pix_fmt", "yuv420p"],
         ),
         (
             "libx264",        # FFmpeg software fallback (H.264)

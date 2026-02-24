@@ -260,8 +260,8 @@ export default function Tagging() {
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
   const detectCameraType = (filename: string): CameraType => {
-    if (filename.includes('_camera1.')) return 'frontale';
-    if (filename.includes('_camera2.')) return 'sagittale';
+    if (filename.includes('_camera1.') || filename.includes('_CF')) return 'frontale';
+    if (filename.includes('_camera2.') || filename.includes('_CS')) return 'sagittale';
     return null;
   };
 

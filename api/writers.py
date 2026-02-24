@@ -15,7 +15,6 @@ import threading
 from typing import Tuple, Union, Optional
 
 from config import (
-    CAMERA_MODE,
     FFMPEG_AVAILABLE,
     imageio_ffmpeg,
     REALSENSE_AVAILABLE,

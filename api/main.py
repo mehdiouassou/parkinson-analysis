@@ -1597,10 +1597,20 @@ def start_conversion(data: ConversionStartRequest):
     """
     batch_id = data.batch_id
 
+    # Check both old naming (_camera1/_camera2) and new naming (_CF/_CS)
     camera1_bag = RECORDINGS_DIR / f"{batch_id}_camera1.bag"
     camera2_bag = RECORDINGS_DIR / f"{batch_id}_camera2.bag"
     has_cam1 = camera1_bag.exists()
     has_cam2 = camera2_bag.exists()
+
+    if not has_cam1:
+        candidates = list(RECORDINGS_DIR.glob(f"{batch_id}_CF*.bag"))
+        if candidates:
+            has_cam1 = True
+    if not has_cam2:
+        candidates = list(RECORDINGS_DIR.glob(f"{batch_id}_CS*.bag"))
+        if candidates:
+            has_cam2 = True
 
     if not has_cam1 and not has_cam2:
         return {"success": False, "message": "No BAG files found for this batch"}
@@ -1771,8 +1781,8 @@ def list_all_files():
              if possible_meta.exists():
                  meta_path = possible_meta
 
-        # Fallback to legacy naming
-        if not meta_path:
+        # Fallback to legacy naming (only if no valid path found above)
+        if not meta_path or not meta_path.exists():
              meta_path = RECORDINGS_DIR / f"{batch_id}_camera1_metadata.json"
              if not meta_path.exists():
                  meta_path = RECORDINGS_DIR / f"{batch_id}_camera2_metadata.json"
@@ -1860,6 +1870,7 @@ def delete_video_batch(batch_id: str):
     deleted = []
     errors = []
 
+    # Old naming: {batch_id}_camera1.bag, {batch_id}_camera2.bag
     for cam_num in [1, 2]:
         base_name = f"{batch_id}_camera{cam_num}"
 
@@ -1872,6 +1883,15 @@ def delete_video_batch(batch_id: str):
                     deleted.append(filename)
                 except Exception as e:
                     errors.append(f"{filename}: {str(e)}")
+
+    # New naming: {batch_id}_CF*.bag, {batch_id}_CS*.bag (and matching .mp4, _metadata.json)
+    for suffix in ["CF", "CS"]:
+        for f in RECORDINGS_DIR.glob(f"{batch_id}_{suffix}*"):
+            try:
+                f.unlink()
+                deleted.append(f.name)
+            except Exception as e:
+                errors.append(f"{f.name}: {str(e)}")
 
     if errors:
         return {"success": False, "deleted": deleted, "errors": errors}

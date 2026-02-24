@@ -447,8 +447,8 @@ export default function CameraFeeds() {
             />
           </div>
           <div className="flex items-center gap-2">
-             <label className="text-sm font-medium text-clinical-text-secondary dark:text-clinical-text-dark-secondary whitespace-nowrap">Note:</label>
-             <input
+            <label className="text-sm font-medium text-clinical-text-secondary dark:text-clinical-text-dark-secondary whitespace-nowrap">Note:</label>
+            <input
               type="text"
               value={note}
               onChange={(e) => setNote(e.target.value)}
@@ -553,7 +553,7 @@ export default function CameraFeeds() {
                 </span>
               )}
             </div>
-            <span className="text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary font-mono">848×480</span>
+            <span className="text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary font-mono">{camerasInfo.find(c => c.camera_id === 0)?.frame_size?.join('×') || '—'}</span>
           </div>
           <div className="flex-1 bg-neutral-900 flex items-center justify-center overflow-hidden relative min-h-0">
             <img
@@ -599,7 +599,7 @@ export default function CameraFeeds() {
                 </span>
               )}
             </div>
-            <span className="text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary font-mono">848×480</span>
+            <span className="text-xs text-clinical-text-secondary dark:text-clinical-text-dark-secondary font-mono">{camerasInfo.find(c => c.camera_id === 1)?.frame_size?.join('×') || '—'}</span>
           </div>
           <div className="flex-1 bg-neutral-900 flex items-center justify-center overflow-hidden relative min-h-0">
             <img
